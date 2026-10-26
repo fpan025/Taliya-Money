@@ -741,7 +741,9 @@ function renderChores(){
     <div class="big num">${st.pct}%</div><div class="bar ch" aria-hidden="true"><i style="width:${st.pct}%"></i></div>`;
   if (paid){
     sum += `<div class="paid num">Paid ${fmt(paid.amount)} for ${Math.round(100*paid.done/paid.total)}% of chores</div>
-      <div class="split"><span class="pill t-spending num">Spending ${fmt(paid.spending)}</span><span class="pill t-savings num">Savings ${fmt(paid.savings)}</span><span class="pill t-gift num">Gifts ${fmt(paid.gift)}</span></div>`;
+      <div class="split"><span class="pill t-spending num">Spending ${fmt(paid.spending)}</span><span class="pill t-savings num">Savings ${fmt(paid.savings)}</span><span class="pill t-gift num">Gifts ${fmt(paid.gift)}</span></div>
+      ${paid.amount>0 ? (paid.funded_at ? `<div class="paid">Funded ✓ <span class="sub" style="font-weight:500">money arrived in her Capital One account</span></div>`
+        : `<div class="sub num">Waiting for the ${fmt(paid.amount)} transfer to her Capital One account</div>`) : ""}`;
   } else if (s.allowance>0){
     sum += `<div class="sub num">${state.wk===0?"On track to earn":"Earned"} <b>${fmt(st.amount)}</b> of the ${fmt(s.allowance)} weekly allowance</div>
       <div class="split"><span class="pill t-spending num">Spending ${fmt(st.sp)}</span><span class="pill t-savings num">Savings ${fmt(st.sv)}</span><span class="pill t-gift num">Gifts ${fmt(st.gf)}</span></div>`;
@@ -779,26 +781,40 @@ function renderChores(){
   }
   const canPay = !paid && st.total>0 && s.allowance>0;
   $("#parentTools").innerHTML = `
-    <div class="card"><div class="goal-row"><h2>Payday</h2>${paid?'<span class="paid">Paid</span>':""}</div>
-      ${paid ? `<div class="sub">This week was paid on ${shortDate(String(paid.paid_at).slice(0,10))}.</div>` :
-        `<div class="sub num">Pays ${fmt(st.amount)} (${st.pct}% of ${fmt(s.allowance)}) into her accounts. ${state.wk===0?"The week isn't over yet, so unchecked chores count as missed.":""}</div>
+    <div class="card"><div class="goal-row"><h2>Payday</h2>${paid?(paid.funded_at||!paid.amount?'<span class="paid">Paid · Funded ✓</span>':'<span class="paid">Paid</span>'):""}</div>
+      ${paid ? `<div class="sub">${paid.auto?"Paid automatically":"Paid"} on ${esc(new Date(paid.paid_at).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}))}.
+          ${paid.amount>0 && !paid.funded_at ? `Send ${fmt(paid.amount)} to her Capital One account. This turns to Funded ✓ when the money arrives.` : ""}</div>
+          ${paid.amount>0 && !paid.funded_at ? `<div class="err" id="payErr" role="alert"></div><button type="button" class="btn ghost small" id="btnFunded">I sent it: mark funded</button>` : ""}` :
+        `<div class="sub num">${s.auto_payday ? (state.wk===0 ? "Pays automatically next Sunday at 8:00 AM." : "Pays automatically Sunday at 8:00 AM.") + " " : ""}Right now that's ${fmt(st.amount)} (${st.pct}% of ${fmt(s.allowance)}). ${state.wk===0?"If you pay early, unchecked chores count as missed.":""}</div>
          <div class="err" id="payErr" role="alert"></div>
-         <button type="button" class="btn primary" id="btnPay" ${canPay?"":"disabled"}>Pay ${fmt(st.amount)}</button>`}
+         <button type="button" class="btn ${s.auto_payday?"ghost small":"primary"}" id="btnPay" ${canPay?"":"disabled"}>Pay ${fmt(st.amount)} now</button>`}
     </div>
     <div class="card"><div class="goal-row"><h2>Weekly allowance</h2><button type="button" class="link" id="btnAllow">Change</button></div>
-      <div class="sub num">${fmt(s.allowance)} per week · ${s.spending}% spending · ${s.savings}% savings · ${s.gift}% gifts</div></div>
+      <div class="sub num">${fmt(s.allowance)} per week · ${s.spending}% spending · ${s.savings}% savings · ${s.gift}% gifts</div>
+      <label class="sw" for="al-auto"><span>Automatic payday<small>Every Sunday at 8:00 AM, then a transfer alert to parents</small></span><input type="checkbox" id="al-auto" ${s.auto_payday!==false?"checked":""}></label></div>
     <div class="card" style="padding:0;gap:0"><div class="goal-row" style="padding:16px 16px 8px"><h2>Chores</h2><button type="button" class="link" id="btnNewChore">Add chore</button></div>
       <div>${state.ch.chores.map(c=>`<div class="erow"><div><b>${esc(c.name)}</b><span>${c.days.length===7?"Every day":c.days.map(d=>DAYS[d]).join(", ")}</span></div><button type="button" class="link" data-editchore="${c.id}">Edit</button></div>`).join("") || '<div class="erow"><span>No chores yet.</span></div>'}</div></div>
     ${alertsCard()}`;
   bindAlerts();
   $("#btnAllow").addEventListener("click", sheetAllowance);
+  $("#al-auto").addEventListener("change", async e=>{
+    const on=e.target.checked;
+    try { await rpc("fm_autopay_save",{p_pw:state.pw,p_pin:state.pin,p_on:on}); state.ch.settings.auto_payday=on; toast(on?"Automatic payday on":"Automatic payday off"); renderChores(); }
+    catch(ex){ e.target.checked=!on; toast(errMsg(ex)); }
+  });
+  const fb=$("#btnFunded");
+  fb && fb.addEventListener("click", async ()=>{
+    fb.disabled=true;
+    try { await rpc("fm_mark_funded",{p_pw:state.pw,p_pin:state.pin,p_week:ws}); toast("Marked funded"); await load(); }
+    catch(e){ $("#payErr").textContent=errMsg(e); fb.disabled=false; }
+  });
   $("#btnNewChore").addEventListener("click", ()=>sheetChore());
   const pay=$("#btnPay");
   if (pay){ let armed=false; pay.addEventListener("click", async ()=>{
     if(!armed){ armed=true; pay.textContent=`Tap again to pay ${fmt(st.amount)}`; return; }
     pay.disabled=true; pay.textContent="Paying…";
     try { const r = await rpc("fm_pay_week",{p_pw:state.pw,p_pin:state.pin,p_week:ws}); toast(`Paid ${fmt(r.amount)}`); await load(); }
-    catch(e){ $("#payErr").textContent=errMsg(e); pay.disabled=false; pay.textContent=`Pay ${fmt(st.amount)}`; }
+    catch(e){ $("#payErr").textContent=errMsg(e); pay.disabled=false; pay.textContent=`Pay ${fmt(st.amount)} now`; }
   }); }
 }
 /* ---------- parent alerts ---------- */
