@@ -373,7 +373,7 @@ function balances(){
   }
   return b;
 }
-/* ---------- card connection (Teller) ---------- */
+/* ---------- card connection (Plaid) ---------- */
 function renderBank(){
   const el=$("#bankCard"), bk=state.bank;
   if (!bk || (!bk.connected && !state.pin) || (!bk.ready && !bk.connected)){ el.hidden=true; el.innerHTML=""; return; }
@@ -381,6 +381,7 @@ function renderBank(){
   if (!bk.connected){
     el.innerHTML = `<h2>Automatic card purchases</h2>
       <div class="sub">Connect Taliya's debit card so every purchase logs itself: swipes, online orders and Apple Pay.</div>
+      <div class="sub">Tip: do this in Safari or on a computer. The bank's sign-in page may not open from the home-screen app.</div>
       <div class="err" id="bk-err" role="alert"></div>
       <button type="button" class="btn primary" id="bk-connect">Connect Taliya's card</button>`;
   } else {
@@ -392,7 +393,7 @@ function renderBank(){
       <div class="btns"><button type="button" class="btn ghost small" id="bk-sync">Check now</button>
       ${state.pin?'<button type="button" class="btn ghost small" id="bk-connect">Reconnect</button><button type="button" class="btn danger small" id="bk-off">Disconnect</button>':""}</div>`;
   }
-  $("#bk-connect")?.addEventListener("click", connectBank);
+  $("#bk-connect")?.addEventListener("click", ()=>connectBank(!!bk.connected));
   $("#bk-sync")?.addEventListener("click", async ()=>{
     try { const ok = await rpc("fm_bank_sync_now",{p_pw:state.pw}); toast(ok?"Checking for new purchases…":"Checked a moment ago");
       if (ok) setTimeout(()=>load().catch(()=>{}), 9000); }
@@ -408,32 +409,65 @@ function renderBank(){
     rpc("fm_bank_status",{p_pw:state.pw,p_pin:state.pin}).then(s=>{ const p=$("#bk-problem"); if(p) p.textContent=s.error||"The last check didn't finish. Tap Check now."; }).catch(()=>{});
   }
 }
-function loadTellerScript(){
-  if (window.TellerConnect) return Promise.resolve();
-  return new Promise((ok, fail)=>{ const s=document.createElement("script"); s.src="https://cdn.teller.io/connect/connect.js";
-    s.onload=()=>ok(); s.onerror=()=>fail(new Error("teller")); document.body.appendChild(s); });
+function loadPlaidScript(){
+  if (window.Plaid) return Promise.resolve();
+  return new Promise((ok, fail)=>{ const s=document.createElement("script"); s.src="https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+    s.onload=()=>ok(); s.onerror=()=>fail(new Error("plaid")); document.body.appendChild(s); });
 }
-async function connectBank(){
-  const err=$("#bk-err"); err.textContent="";
-  if (!state.pin){ requireParent(connectBank); return; }
+async function bankFn(body){
+  let res;
+  try {
+    res = await fetch(CFG.SUPABASE_URL.replace(/\/$/,"") + "/functions/v1/plaid-sync", {
+      method:"POST", headers:{"Content-Type":"application/json","apikey":CFG.SUPABASE_ANON_KEY},
+      body: JSON.stringify(Object.assign({pw:state.pw, pin:state.pin}, body)) });
+  } catch(e){ throw "Couldn't reach the plaid-sync program. Check that it's deployed in Supabase (Edge Functions) with JWT verification turned off."; }
+  let data={}; try { data = await res.json(); } catch(e){}
+  if (res.status===401 && !data.error) throw "Supabase blocked the request. Turn off \"Enforce JWT verification\" for plaid-sync.";
+  if (res.status===404) throw "The plaid-sync program wasn't found. Check its name in Supabase Edge Functions.";
+  if (!data.ok) throw (data.error || "The bank connection didn't work. Try again.");
+  return data;
+}
+function pickAccount(accounts){
+  if (accounts.length <= 1) return Promise.resolve(accounts[0] || null);
+  return new Promise(resolve=>{
+    openSheet(`<h3>Which account is Taliya's?</h3>
+      <p class="sub" style="margin:0 0 12px">Only purchases from this account will be logged.</p>
+      <div class="list">${accounts.map((a,i)=>`<button type="button" class="crow" data-acc="${i}"><span><span class="cname">${esc(a.name||"Account")}</span><span class="cwhen">${esc([a.subtype,a.mask?"ending "+a.mask:""].filter(Boolean).join(" · "))}</span></span></button>`).join("")}</div>
+      <div class="btns" style="margin-top:14px"><button type="button" class="btn ghost" data-close>Cancel</button></div>`, el=>{
+      el.querySelector("[data-close]").addEventListener("click", ()=>{ closeSheet(); resolve(null); });
+      el.querySelectorAll("[data-acc]").forEach(b=>b.addEventListener("click", ()=>{ closeSheet(); resolve(accounts[+b.dataset.acc]); }));
+    });
+  });
+}
+async function connectBank(update){
+  update = update===true;
+  const err=$("#bk-err"); if (err) err.textContent="";
+  const show = m => { const x=$("#bk-err"); if (x) x.textContent=m; else toast(m); };
+  if (!state.pin){ requireParent(()=>connectBank(update)); return; }
   try {
     const st = await rpc("fm_bank_status",{p_pw:state.pw,p_pin:state.pin});
-    if (!st || !st.app_id) throw "Bank settings are missing. Run bank-setup.sql in Supabase first.";
-    await loadTellerScript().catch(()=>{ throw "Couldn't load the secure bank sign-in. Check your connection and try again."; });
-    const tc = window.TellerConnect.setup({
-      applicationId: st.app_id, environment: "development", products: ["transactions"], selectAccount: "single",
-      onSuccess: async (enr)=>{
+    if (!st || !st.ready) throw "Bank settings are missing. Run bank-setup.sql in Supabase first.";
+    const [{link_token}] = await Promise.all([ bankFn({action:"link_token", update}),
+      loadPlaidScript().catch(()=>{ throw "Couldn't load the secure bank sign-in. Check your connection and try again."; }) ]);
+    const handler = window.Plaid.create({
+      token: link_token,
+      onSuccess: async (public_token, md)=>{
         try {
-          await rpc("fm_bank_connect",{p_pw:state.pw,p_pin:state.pin,p_token:enr.accessToken,
-            p_enrollment:(enr.enrollment&&enr.enrollment.id)||"",p_institution:(enr.enrollment&&enr.enrollment.institution&&enr.enrollment.institution.name)||"Bank"});
-          toast("Card connected. Checking for purchases…");
-          await load(); setTimeout(()=>load().catch(()=>{}), 10000);
-        } catch(e){ const x=$("#bk-err"); if(x) x.textContent=errMsg(e); }
+          if (update){ await bankFn({action:"reconnected"}); toast("Reconnected"); await load(); return; }
+          const acct = await pickAccount((md && md.accounts) || []);
+          if (!acct){ show("Not connected. Pick Taliya's account to finish."); return; }
+          toast("Connecting…");
+          await bankFn({action:"exchange", public_token, account_id:acct.id,
+            account_name:[acct.name, acct.mask?"··"+acct.mask:""].filter(Boolean).join(" "),
+            institution:(md && md.institution && md.institution.name) || "Bank"});
+          toast("Card connected. Purchases from today on will log automatically.");
+          await load(); setTimeout(()=>load().catch(()=>{}), 15000);
+        } catch(e){ show(errMsg(e)); await load().catch(()=>{}); }
       },
-      onExit: ()=>{}
+      onExit: (e)=>{ if (e && (e.display_message || e.error_message)) show(e.display_message || e.error_message); }
     });
-    tc.open();
-  } catch(e){ err.textContent=errMsg(e); }
+    handler.open();
+  } catch(e){ show(errMsg(e)); }
 }
 
 function render(){
