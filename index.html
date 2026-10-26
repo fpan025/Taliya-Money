@@ -13,14 +13,8 @@
 <link rel="icon" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
-<script>
-/* ======== SETUP: paste your two values from Supabase > Project Settings > API ======== */
-window.FAMILY_CONFIG = {
-  SUPABASE_URL: "https://pzefmdtfpusnzaqninqx.supabase.co",
-  SUPABASE_ANON_KEY: "sb_publishable_1kBMaaYwdzvuZ667QXdzpQ_wdl0k_ZE"
-};
-/* ===================================================================================== */
-</script>
+<!-- Your Supabase URL and key live in config.js, so this file can be replaced with updates without re-entering them. -->
+<script src="config.js"></script>
 <style>
 :root{
   --bg:#F3F5F7; --surface:#FFFFFF; --ink:#152330; --muted:#5D6B78; --line:#DDE3E9;
@@ -201,6 +195,17 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:70
 .dpick input:focus-visible + span{outline:3px solid var(--accent);outline-offset:2px}
 .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .hint{font-size:14px;color:var(--muted);text-align:center}
+.sw{display:flex;justify-content:space-between;align-items:center;gap:12px;font-weight:600}
+.sw input{appearance:none;-webkit-appearance:none;width:50px;height:30px;border-radius:99px;background:var(--line);position:relative;flex:none;transition:background .2s;margin:0}
+.sw input::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}
+.sw input:checked{background:var(--save)}
+.sw input:checked::after{transform:translateX(20px)}
+.sw small{display:block;font-weight:500;color:var(--muted);font-size:13px}
+.topic{display:flex;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:8px 8px 8px 12px}
+.topic code{flex:1;min-width:0;overflow-wrap:anywhere;font-size:14px;font-family:ui-monospace,Menlo,monospace;user-select:all;-webkit-user-select:all}
+.topic button{border:0;background:var(--accent);color:var(--accent-ink);border-radius:9px;padding:8px 12px;font-weight:700;font-size:13px}
+ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.btn.small{padding:11px;font-size:15px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:600;font-size:14px;z-index:60}
 </style>
 </head>
@@ -261,6 +266,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:70
     <div class="sub num" id="goalText">Pick something to save for and watch savings fill this bar.</div>
   </div>
 
+  <div class="card" id="bankCard" hidden></div>
+
   <section class="activity">
     <div class="act-head"><h2>Activity</h2><div class="chips" id="chips" role="group" aria-label="Filter activity"></div></div>
     <div class="list" id="list"></div>
@@ -319,7 +326,7 @@ async function rpc(fn, args){
   if (!res.ok){
     let msg = text; try { msg = JSON.parse(text).message || text; } catch(e){}
     const m = String(msg).trim();
-    if (m==="wrong_pin" && fn!=="fm_parent_ok"){ state.pin=null; pinStore.clear(); renderParentBtn(); }  // PIN was changed
+    if (m==="wrong_pin" && fn!=="fm_parent_ok"){ state.pin=null; state.alerts=null; pinStore.clear(); renderParentBtn(); }  // PIN was changed
     throw {code: /^[a-z_]+$/.test(m) ? m : "server", message:m};
   }
   return text ? JSON.parse(text) : null;
@@ -347,9 +354,11 @@ function weekStart(ds){ const [Y,M,D]=ds.split("-").map(Number); const d=new Dat
 function addDays(ds,n){ const [Y,M,D]=ds.split("-").map(Number); const d=new Date(Y,M-1,D+n); return ymd(d); }
 async function load(){
   const from = addDays(weekStart(today()), -7*9);
-  const [r, c] = await Promise.all([ rpc("fm_load", {p_pw: state.pw}), rpc("fm_load_chores", {p_pw: state.pw, p_from: from}) ]);
+  const [r, c, bk] = await Promise.all([ rpc("fm_load", {p_pw: state.pw}), rpc("fm_load_chores", {p_pw: state.pw, p_from: from}),
+    rpc("fm_bank_public", {p_pw: state.pw}).catch(()=>null) ]);
   state.tx = (r.tx||[]).map(t => ({...t, created_at:Number(t.created_at)}));
   state.goal = r.goal;
+  state.bank = bk;
   state.ch = { chores:c.chores||[], checks:(c.checks||[]).map(k=>({...k,checked_at:Number(k.checked_at)})), settings:c.settings||state.ch.settings, payouts:c.payouts||[], today:c.today||today() };
   render(); renderChores();
 }
@@ -364,7 +373,71 @@ function balances(){
   }
   return b;
 }
+/* ---------- card connection (Teller) ---------- */
+function renderBank(){
+  const el=$("#bankCard"), bk=state.bank;
+  if (!bk || (!bk.connected && !state.pin) || (!bk.ready && !bk.connected)){ el.hidden=true; el.innerHTML=""; return; }
+  el.hidden=false;
+  if (!bk.connected){
+    el.innerHTML = `<h2>Automatic card purchases</h2>
+      <div class="sub">Connect Taliya's debit card so every purchase logs itself: swipes, online orders and Apple Pay.</div>
+      <div class="err" id="bk-err" role="alert"></div>
+      <button type="button" class="btn primary" id="bk-connect">Connect Taliya's card</button>`;
+  } else {
+    const when = bk.last_sync ? new Date(Number(bk.last_sync)).toLocaleString("en-US",{weekday:"short",hour:"numeric",minute:"2-digit"}) : "not yet";
+    el.innerHTML = `<div class="goal-row"><h2>${esc(bk.institution||"Card")} connected</h2>${bk.problem?'<span class="tag" style="color:var(--danger)">Needs attention</span>':""}</div>
+      <div class="sub">${esc(bk.account||"Taliya's account")} · last checked ${esc(when)} · checks every 30 minutes</div>
+      ${bk.problem && state.pin ? `<div class="err" id="bk-problem">Loading details…</div>` : bk.problem ? `<div class="sub">Ask a parent to check the card connection.</div>` : ""}
+      <div class="err" id="bk-err" role="alert"></div>
+      <div class="btns"><button type="button" class="btn ghost small" id="bk-sync">Check now</button>
+      ${state.pin?'<button type="button" class="btn ghost small" id="bk-connect">Reconnect</button><button type="button" class="btn danger small" id="bk-off">Disconnect</button>':""}</div>`;
+  }
+  $("#bk-connect")?.addEventListener("click", connectBank);
+  $("#bk-sync")?.addEventListener("click", async ()=>{
+    try { const ok = await rpc("fm_bank_sync_now",{p_pw:state.pw}); toast(ok?"Checking for new purchases…":"Checked a moment ago");
+      if (ok) setTimeout(()=>load().catch(()=>{}), 9000); }
+    catch(e){ $("#bk-err").textContent=errMsg(e); }
+  });
+  const off=$("#bk-off"); let armed=false;
+  off && off.addEventListener("click", async ()=>{
+    if(!armed){ armed=true; off.textContent="Tap again"; return; }
+    try { await rpc("fm_bank_disconnect",{p_pw:state.pw,p_pin:state.pin}); toast("Card disconnected"); await load(); }
+    catch(e){ $("#bk-err").textContent=errMsg(e); }
+  });
+  if (bk.problem && state.pin){
+    rpc("fm_bank_status",{p_pw:state.pw,p_pin:state.pin}).then(s=>{ const p=$("#bk-problem"); if(p) p.textContent=s.error||"The last check didn't finish. Tap Check now."; }).catch(()=>{});
+  }
+}
+function loadTellerScript(){
+  if (window.TellerConnect) return Promise.resolve();
+  return new Promise((ok, fail)=>{ const s=document.createElement("script"); s.src="https://cdn.teller.io/connect/connect.js";
+    s.onload=()=>ok(); s.onerror=()=>fail(new Error("teller")); document.body.appendChild(s); });
+}
+async function connectBank(){
+  const err=$("#bk-err"); err.textContent="";
+  if (!state.pin){ requireParent(connectBank); return; }
+  try {
+    const st = await rpc("fm_bank_status",{p_pw:state.pw,p_pin:state.pin});
+    if (!st || !st.app_id) throw "Bank settings are missing. Run bank-setup.sql in Supabase first.";
+    await loadTellerScript().catch(()=>{ throw "Couldn't load the secure bank sign-in. Check your connection and try again."; });
+    const tc = window.TellerConnect.setup({
+      applicationId: st.app_id, environment: "development", products: ["transactions"], selectAccount: "single",
+      onSuccess: async (enr)=>{
+        try {
+          await rpc("fm_bank_connect",{p_pw:state.pw,p_pin:state.pin,p_token:enr.accessToken,
+            p_enrollment:(enr.enrollment&&enr.enrollment.id)||"",p_institution:(enr.enrollment&&enr.enrollment.institution&&enr.enrollment.institution.name)||"Bank"});
+          toast("Card connected. Checking for purchases…");
+          await load(); setTimeout(()=>load().catch(()=>{}), 10000);
+        } catch(e){ const x=$("#bk-err"); if(x) x.textContent=errMsg(e); }
+      },
+      onExit: ()=>{}
+    });
+    tc.open();
+  } catch(e){ err.textContent=errMsg(e); }
+}
+
 function render(){
+  renderBank();
   const b=balances(), total=b.spending+b.savings+b.gift, tf=fmt(total), dot=tf.lastIndexOf(".");
   $("#total").innerHTML = esc(tf.slice(0,dot))+"<small>"+esc(tf.slice(dot))+"</small>";
   $("#accounts").innerHTML = ACCTS.map(a=>`<button type="button" class="acct t-${a.id}" data-acct="${a.id}" aria-pressed="${state.filter===a.id}">
@@ -405,7 +478,8 @@ function render(){
     if (t.type==="deposit"){ title=t.note||"Money added"; sub=`Into ${acctName(t.account)}`+(t.from_who?` · from ${t.from_who}`:""); sign="+"; }
     else if (t.type==="purchase"){ title=t.store||"Purchase"; sub=acctName(t.account)+(t.note?` · ${t.note}`:""); sign="−"; }
     else { title=`${acctName(t.account)} → ${acctName(t.to_account)}`; sub=t.note||"Moved money"; tone=t.to_account; if(f===t.account)sign="−"; else if(f===t.to_account)sign="+"; }
-    const tags = (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.has_receipt?'<span class="tag">Receipt</span>':"");
+    const tags = (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.source==="bank"?'<span class="tag pay">Card</span>':"")
+      +(t.bank_status==="pending"?'<span class="tag">Pending</span>':"")+(t.has_receipt?'<span class="tag">Receipt</span>':"");
     html+=`<button type="button" class="row t-${tone}" data-detail="${esc(t.id)}">
       <span class="ico">${ICON[t.type]}</span>
       <span class="what"><b>${esc(title)}</b><span>${esc(sub)}</span></span>
@@ -537,6 +611,8 @@ function sheetDetail(id){
   else rows.push([t.type==="deposit"?"Into":"Paid from",acctName(t.account)]);
   if (t.from_who) rows.push(["From",t.from_who]);
   if (t.source==="apple pay") rows.push(["Logged by","Apple Pay (automatic)"]);
+  if (t.source==="bank") rows.push(["Logged by","Her card (automatic)"]);
+  if (t.bank_status) rows.push(["Bank status", t.bank_status==="pending" ? "Pending (amount may change)" : "Posted"]);
   const editable = t.type==="purchase";
   openSheet(`<div class="detail"><h3>${esc(t.store||kind)}</h3>
     <div id="rslot">${t.has_receipt?'<div class="sub">Loading receipt…</div>':""}</div>
@@ -587,7 +663,7 @@ function requireParent(then){
     <label class="f">Enter the parent PIN<input type="password" id="f-pin" name="pin" inputmode="numeric" autocomplete="off" required></label>
     <label class="check"><input type="checkbox" id="f-rememberpin" name="remember"> Remember on this phone (parents' phones only)</label>
     ${footer("Unlock")}</form>`, el=>{
-    setTimeout(()=>el.querySelector("#f-pin").focus(),60);
+    setTimeout(()=>el.querySelector("#f-pin")?.focus(),60);
     el.querySelector("[data-close]").addEventListener("click", closeSheet);
     el.querySelector("form").addEventListener("submit", async e=>{
       e.preventDefault();
@@ -604,7 +680,7 @@ function requireParent(then){
   });
 }
 $("#btnParent").addEventListener("click", ()=>{
-  if (state.pin){ state.pin=null; pinStore.clear(); renderParentBtn(); renderChores(); toast("Parent mode off"); }
+  if (state.pin){ state.pin=null; state.alerts=null; pinStore.clear(); renderParentBtn(); render(); renderChores(); toast("Parent mode off"); }
   else requireParent();
 });
 
@@ -678,7 +754,9 @@ function renderChores(){
     <div class="card"><div class="goal-row"><h2>Weekly allowance</h2><button type="button" class="link" id="btnAllow">Change</button></div>
       <div class="sub num">${fmt(s.allowance)} per week · ${s.spending}% spending · ${s.savings}% savings · ${s.gift}% gifts</div></div>
     <div class="card" style="padding:0;gap:0"><div class="goal-row" style="padding:16px 16px 8px"><h2>Chores</h2><button type="button" class="link" id="btnNewChore">Add chore</button></div>
-      <div>${state.ch.chores.map(c=>`<div class="erow"><div><b>${esc(c.name)}</b><span>${c.days.length===7?"Every day":c.days.map(d=>DAYS[d]).join(", ")}</span></div><button type="button" class="link" data-editchore="${c.id}">Edit</button></div>`).join("") || '<div class="erow"><span>No chores yet.</span></div>'}</div></div>`;
+      <div>${state.ch.chores.map(c=>`<div class="erow"><div><b>${esc(c.name)}</b><span>${c.days.length===7?"Every day":c.days.map(d=>DAYS[d]).join(", ")}</span></div><button type="button" class="link" data-editchore="${c.id}">Edit</button></div>`).join("") || '<div class="erow"><span>No chores yet.</span></div>'}</div></div>
+    ${alertsCard()}`;
+  bindAlerts();
   $("#btnAllow").addEventListener("click", sheetAllowance);
   $("#btnNewChore").addEventListener("click", ()=>sheetChore());
   const pay=$("#btnPay");
@@ -689,6 +767,58 @@ function renderChores(){
     catch(e){ $("#payErr").textContent=errMsg(e); pay.disabled=false; pay.textContent=`Pay ${fmt(st.amount)}`; }
   }); }
 }
+/* ---------- parent alerts ---------- */
+function alertsCard(){
+  const a = state.alerts;
+  if (!a){ loadAlerts(); return `<div class="card"><h2>Alerts</h2><div class="sub">Loading alert settings…</div></div>`; }
+  return `<div class="card"><h2>Alerts on parents' phones</h2>
+    <label class="sw" for="al-chores"><span>Chore completed<small>Each time Taliya checks off a chore</small></span><input type="checkbox" id="al-chores" ${a.chores?"checked":""}></label>
+    <label class="sw" for="al-purch"><span>Purchases<small>Apple Pay taps and purchases she logs</small></span><input type="checkbox" id="al-purch" ${a.purchases?"checked":""}></label>
+    <div class="sub" style="font-weight:700;color:var(--ink);margin-top:4px">Set up each parent's iPhone once</div>
+    <ol class="steps">
+      <li>Install the free <b>ntfy</b> app from the App Store.</li>
+      <li>Open it, tap <b>+</b>, and paste this topic. Leave the server as ntfy.sh.</li>
+    </ol>
+    <div class="topic"><code id="al-topic">${esc(a.topic||"")}</code><button type="button" id="al-copy">Copy</button></div>
+    <ol class="steps" start="3"><li>Tap <b>Subscribe</b> and allow notifications.</li></ol>
+    <div class="sub">Keep the topic private. Anyone who has it can see these alerts.</div>
+    <div class="err" id="al-err" role="alert"></div>
+    <div class="btns"><button type="button" class="btn ghost small" id="al-test">Send test alert</button><button type="button" class="btn ghost small" id="al-new">New topic</button></div>
+  </div>`;
+}
+async function loadAlerts(){
+  if (loadAlerts.busy || !state.pin) return; loadAlerts.busy = true;
+  try { state.alerts = await rpc("fm_alerts_get",{p_pw:state.pw,p_pin:state.pin}); renderChores(); }
+  catch(e){ const el=$("#parentTools .card:last-child .sub"); if(el) el.textContent=errMsg(e); }
+  loadAlerts.busy = false;
+}
+function bindAlerts(){
+  if (!state.alerts) return;
+  const err=()=>$("#al-err");
+  const save = async ()=>{
+    const c=$("#al-chores").checked, p=$("#al-purch").checked;
+    try { await rpc("fm_alerts_save",{p_pw:state.pw,p_pin:state.pin,p_chores:c,p_purchases:p}); state.alerts.chores=c; state.alerts.purchases=p; toast("Alerts updated"); }
+    catch(e){ err().textContent=errMsg(e); }
+  };
+  $("#al-chores").addEventListener("change", save); $("#al-purch").addEventListener("change", save);
+  $("#al-copy").addEventListener("click", ()=>{
+    const t=state.alerts.topic||"";
+    const ok=()=>toast("Topic copied");
+    try { navigator.clipboard.writeText(t).then(ok, ()=>selectTopic()); } catch(e){ selectTopic(); }
+  });
+  $("#al-test").addEventListener("click", async ()=>{
+    try { await rpc("fm_alerts_test",{p_pw:state.pw,p_pin:state.pin}); toast("Test alert sent"); }
+    catch(e){ err().textContent=errMsg(e); }
+  });
+  const nb=$("#al-new"); let armed=false;
+  nb.addEventListener("click", async ()=>{
+    if(!armed){ armed=true; nb.textContent="Tap again: everyone re-subscribes"; return; }
+    try { state.alerts.topic = await rpc("fm_alerts_new_topic",{p_pw:state.pw,p_pin:state.pin}); renderChores(); toast("New topic made. Subscribe to it in ntfy."); }
+    catch(e){ err().textContent=errMsg(e); }
+  });
+}
+function selectTopic(){ const el=$("#al-topic"); const r=document.createRange(); r.selectNodeContents(el); const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast("Topic selected. Tap Copy in the menu."); }
+
 async function toggleChore(cid){
   const day=state.day, was=!!isDone(cid,day);
   // instant feedback
@@ -768,7 +898,7 @@ $("#btnAdd").addEventListener("click", ()=>requireParent(sheetAdd));
 $("#btnBuy").addEventListener("click", sheetBuy);
 $("#btnMove").addEventListener("click", ()=>requireParent(sheetMove));
 $("#btnGoal").addEventListener("click", sheetGoal);
-$("#btnLock").addEventListener("click", ()=>{ store.clear(); pinStore.clear(); state.pw=null; state.pin=null; state.tx=[]; renderParentBtn(); showLogin(); });
+$("#btnLock").addEventListener("click", ()=>{ store.clear(); pinStore.clear(); state.pw=null; state.pin=null; state.alerts=null; state.tx=[]; renderParentBtn(); showLogin(); });
 document.addEventListener("click", e=>{
   const a=e.target.closest("[data-acct]"); if(a){ state.filter = state.filter===a.dataset.acct?"all":a.dataset.acct; render(); return; }
   const f=e.target.closest("[data-filter]"); if(f){ state.filter=f.dataset.filter; render(); return; }
@@ -799,7 +929,7 @@ setInterval(refresh, 30000);
 
 render();
 if (!CFG || /YOUR-/.test(CFG.SUPABASE_URL+CFG.SUPABASE_ANON_KEY)){
-  showLogin("This app isn't connected yet. Paste your Supabase URL and key into the SETUP section at the top of index.html.");
+  showLogin("This app isn't connected yet. Put your Supabase URL and key in config.js and upload it next to index.html.");
   $("#loginBtn").disabled=true;
 } else {
   const saved=store.get();
