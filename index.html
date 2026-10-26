@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Taliya's Money</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Taliya's $">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="robots" content="noindex">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
+<script>
+/* ======== SETUP: paste your two values from Supabase > Project Settings > API ======== */
+window.FAMILY_CONFIG = {
+  SUPABASE_URL: "https://YOUR-PROJECT.supabase.co",
+  SUPABASE_ANON_KEY: "YOUR-ANON-PUBLIC-KEY"
+};
+/* ===================================================================================== */
+</script>
+<style>
+:root{
+  --bg:#F3F5F7; --surface:#FFFFFF; --ink:#152330; --muted:#5D6B78; --line:#DDE3E9;
+  --accent:#24476B; --accent-ink:#FFFFFF;
+  --spend:#D9512C; --save:#17806A; --gift:#7A56B0;
+  --spend-soft:#FBE7E0; --save-soft:#DDF1EB; --gift-soft:#EDE5F7;
+  --danger:#B3261E; --shadow:0 10px 30px rgba(21,35,48,.10);
+  --f-display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --f-body:"Figtree", -apple-system, "Segoe UI", system-ui, sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#0F171E; --surface:#17222C; --ink:#E8EEF3; --muted:#9AA8B5; --line:#283643;
+  --accent:#8FB8E6; --accent-ink:#0F171E;
+  --spend:#F07B57; --save:#44C2A2; --gift:#B394E6;
+  --spend-soft:#3A221B; --save-soft:#14322B; --gift-soft:#2B2240;
+  --danger:#F2867E; --shadow:0 10px 30px rgba(0,0,0,.4); color-scheme:dark}}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:calc(20px + env(safe-area-inset-top,0px));padding-bottom:calc(48px + env(safe-area-inset-bottom,0px));
+  -webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+.app{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+.num{font-variant-numeric:tabular-nums}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:10px}
+
+header.hero{display:flex;flex-direction:column;gap:4px}
+.toprow{display:flex;justify-content:space-between;align-items:center}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.hero h1{font-family:var(--f-display);font-weight:800;font-size:clamp(30px,8vw,40px);line-height:1.05;margin:0;text-wrap:balance}
+.total{font-family:var(--f-display);font-weight:600;font-size:clamp(44px,13vw,64px);line-height:1;letter-spacing:-.02em;margin-top:10px}
+.total small{font-size:.45em;color:var(--muted);font-weight:600}
+.sub{color:var(--muted);font-size:14px}
+.lock{background:none;border:1px solid var(--line);border-radius:99px;padding:4px 12px;font-size:13px;font-weight:600;color:var(--muted)}
+
+.accounts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.acct{border:0;text-align:left;border-radius:16px;padding:14px 12px;display:flex;flex-direction:column;gap:6px;min-width:0;background:var(--soft);color:var(--ink);transition:transform .15s}
+.acct:active{transform:scale(.97)}
+.acct[aria-pressed="true"]{box-shadow:inset 0 0 0 2px var(--tone)}
+.acct .lbl{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--tone)}
+.acct .dot{width:8px;height:8px;border-radius:50%;background:var(--tone)}
+.acct .amt{font-family:var(--f-display);font-weight:600;font-size:clamp(19px,5.6vw,26px);line-height:1.1;overflow-wrap:anywhere}
+.t-spending{--tone:var(--spend);--soft:var(--spend-soft)}
+.t-savings{--tone:var(--save);--soft:var(--save-soft)}
+.t-gift{--tone:var(--gift);--soft:var(--gift-soft)}
+
+.actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.act{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:12px 6px;display:flex;flex-direction:column;align-items:center;gap:6px;font-weight:600;font-size:14px}
+.act svg{width:24px;height:24px;stroke:var(--accent);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+.goal{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.goal-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.goal h2{font-size:15px;margin:0;font-weight:700}
+.bar{height:12px;border-radius:99px;background:var(--save-soft);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--save);border-radius:99px;width:0;transition:width .6s ease}
+.link{background:none;border:0;color:var(--accent);font-weight:600;padding:0;font-size:14px}
+
+section.activity{display:flex;flex-direction:column;gap:12px}
+.act-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.act-head h2{font-family:var(--f-display);font-weight:800;font-size:22px;margin:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:5px 11px;font-size:13px;font-weight:600}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.list{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.day{padding:10px 16px 4px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 16px;border-top:1px solid var(--line);width:100%;background:none;border-left:0;border-right:0;border-bottom:0;text-align:left}
+.day + .row{border-top:0}
+.ico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--soft);color:var(--tone)}
+.ico svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.what{min-width:0}
+.what b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.what span{font-size:13px;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.right{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+.money{font-weight:700}
+.money.plus{color:var(--save)}
+.tags{display:flex;gap:4px}
+.tag{font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.tag.pay{color:var(--accent)}
+.empty{padding:28px 20px;text-align:center;display:flex;flex-direction:column;gap:8px;align-items:center;color:var(--muted)}
+.empty b{color:var(--ink);font-size:17px}
+.notice{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;font-size:14px;color:var(--muted)}
+
+/* login */
+.login{max-width:420px;margin:12vh auto 0;display:flex;flex-direction:column;gap:18px}
+.login h1{font-family:var(--f-display);font-weight:800;font-size:40px;line-height:1.05;margin:0}
+.login p{margin:0;color:var(--muted)}
+.check{display:flex;gap:10px;align-items:center;font-size:15px;color:var(--ink)}
+.check input{width:20px;height:20px}
+
+/* sheet */
+.scrim{position:fixed;inset:0;background:rgba(10,18,26,.45);z-index:40;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--surface);width:100%;max-width:560px;border-radius:22px 22px 0 0;box-shadow:var(--shadow);
+  padding:20px max(18px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px));
+  max-height:92%;overflow-y:auto;animation:up .22s ease}
+@keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}.bar i{transition:none}}
+.sheet h3{font-family:var(--f-display);font-weight:800;font-size:24px;margin:0 0 14px}
+form{display:flex;flex-direction:column;gap:14px}
+label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--muted)}
+.f input,.f select{border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:12px;font-size:16px;font-weight:500;width:100%;min-width:0}
+.amount-in{font-family:var(--f-display);font-size:32px!important;font-weight:600!important}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.seg label{position:relative}
+.seg input{position:absolute;opacity:0;inset:0}
+.seg span{display:block;text-align:center;padding:10px 4px;border-radius:12px;border:1px solid var(--line);font-weight:600;font-size:14px;color:var(--ink)}
+.seg input:checked + span{background:var(--soft);border-color:var(--tone);color:var(--tone);box-shadow:inset 0 0 0 1px var(--tone)}
+.seg input:focus-visible + span{outline:3px solid var(--accent);outline-offset:2px}
+.seg input:disabled + span{opacity:.35}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.receipt-pick{display:flex;align-items:center;gap:12px;border:1px dashed var(--line);border-radius:12px;padding:10px 12px;color:var(--muted);font-size:14px;font-weight:600;background:none;width:100%;text-align:left}
+.receipt-pick img{width:52px;height:52px;object-fit:cover;border-radius:8px}
+.err{color:var(--danger);font-size:14px;font-weight:600;min-height:1em}
+.btns{display:flex;gap:10px}
+.btn{flex:1;border:0;border-radius:14px;padding:14px;font-weight:700;font-size:16px}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:var(--bg);color:var(--ink);border:1px solid var(--line)}
+.btn.danger{background:none;color:var(--danger);border:1px solid var(--line)}
+.btn:disabled{opacity:.6}
+.detail dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 16px;margin:0 0 16px}
+.detail dt{color:var(--muted);font-size:14px}
+.detail dd{margin:0;font-weight:600;overflow-wrap:anywhere}
+.detail .rimg{width:100%;border-radius:12px;margin-bottom:14px;border:1px solid var(--line)}
+/* tabs & parent */
+.topbtns{display:flex;gap:6px}
+.lock.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.tabs{display:grid;grid-template-columns:1fr 1fr;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px;gap:4px}
+.tabs button{border:0;background:none;border-radius:10px;padding:10px;font-weight:700;font-size:15px;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+.view{display:flex;flex-direction:column;gap:22px}
+
+/* chores */
+.weeknav{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.weeknav b{font-family:var(--f-display);font-weight:800;font-size:20px;text-align:center}
+.weeknav b span{display:block;font-family:var(--f-body);font-size:13px;font-weight:600;color:var(--muted)}
+.navbtn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--surface);font-size:20px;font-weight:700;display:grid;place-items:center}
+.navbtn:disabled{opacity:.3}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.card h2{font-size:15px;margin:0;font-weight:700}
+.big{font-family:var(--f-display);font-weight:600;font-size:34px;line-height:1}
+.bar.ch{background:var(--spend-soft)} .bar.ch i{background:var(--accent)}
+.split{display:flex;gap:6px;flex-wrap:wrap}
+.pill{font-size:13px;font-weight:700;padding:4px 10px;border-radius:99px;background:var(--soft);color:var(--tone)}
+.paid{font-weight:700;color:var(--save)}
+.days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.dbtn{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 2px;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0}
+.dbtn small{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.dbtn b{font-size:17px}
+.dbtn i{font-style:normal;font-size:11px;font-weight:700;color:var(--muted)}
+.dbtn.full i{color:var(--save)}
+.dbtn.today{border-color:var(--accent)}
+.dbtn[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.dbtn[aria-pressed="true"] small,.dbtn[aria-pressed="true"] i{color:var(--bg)}
+.crow{display:flex;align-items:center;gap:14px;padding:14px 16px;border-top:1px solid var(--line);width:100%;background:none;border-left:0;border-right:0;border-bottom:0;text-align:left}
+.crow:first-child{border-top:0}
+.crow:disabled{cursor:default}
+.box{width:28px;height:28px;border-radius:9px;border:2px solid var(--line);display:grid;place-items:center;flex:none}
+.box svg{width:16px;height:16px;stroke:var(--accent-ink);fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;opacity:0}
+.crow.done .box{background:var(--save);border-color:var(--save)}
+.crow.done .box svg{opacity:1;stroke:#fff}
+.crow.done .cname{text-decoration:line-through;color:var(--muted)}
+.cname{font-weight:600;display:block}
+.cwhen{font-size:13px;color:var(--muted);display:block}
+.erow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line)}
+.erow:first-child{border-top:0}
+.erow div{min-width:0}
+.erow b{display:block;font-weight:600;overflow-wrap:anywhere}
+.erow span{font-size:13px;color:var(--muted)}
+.dpick{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.dpick label{position:relative}
+.dpick input{position:absolute;opacity:0;inset:0}
+.dpick span{display:block;text-align:center;padding:10px 0;border-radius:10px;border:1px solid var(--line);font-weight:700;font-size:13px;color:var(--ink)}
+.dpick input:checked + span{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.dpick input:focus-visible + span{outline:3px solid var(--accent);outline-offset:2px}
+.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.hint{font-size:14px;color:var(--muted);text-align:center}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:600;font-size:14px;z-index:60}
+</style>
+</head>
+<body>
+
+<!-- ===== password screen ===== -->
+<div class="login" id="login" hidden>
+  <div class="eyebrow">Family bank</div>
+  <h1>Taliya's Money</h1>
+  <p>Enter the family password to open Taliya's accounts.</p>
+  <form id="loginForm">
+    <label class="f">Family password<input type="password" id="pw" autocomplete="current-password" required></label>
+    <label class="check"><input type="checkbox" id="remember" checked> Remember on this phone</label>
+    <div class="err" id="loginErr" role="alert"></div>
+    <button type="submit" class="btn primary" id="loginBtn">Open</button>
+  </form>
+</div>
+
+<!-- ===== main app ===== -->
+<div class="app" id="app" hidden>
+  <header class="hero">
+    <div class="toprow"><div class="eyebrow">Family bank</div><div class="topbtns"><button type="button" class="lock" id="btnParent">Parent</button><button type="button" class="lock" id="btnLock">Lock</button></div></div>
+    <h1>Taliya's Money</h1>
+    <div class="total num" id="total">$0<small>.00</small></div>
+    <div class="sub" id="totalSub">across spending, savings and gifts</div>
+  </header>
+
+  <div id="notice" class="notice" hidden></div>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" id="tabMoney" aria-selected="true">Money</button>
+    <button type="button" role="tab" id="tabChores" aria-selected="false">Chores</button>
+  </div>
+
+  <div class="view" id="choresView" hidden>
+    <div class="weeknav">
+      <button type="button" class="navbtn" id="wkPrev" aria-label="Previous week">‹</button>
+      <b id="wkLabel">This week</b>
+      <button type="button" class="navbtn" id="wkNext" aria-label="Next week">›</button>
+    </div>
+    <div class="card" id="wkSummary"></div>
+    <div class="days" id="days" role="group" aria-label="Day of week"></div>
+    <div class="list" id="choreList"></div>
+    <div id="parentTools"></div>
+  </div>
+
+  <div class="view" id="moneyView">
+  <div class="accounts" id="accounts" role="group" aria-label="Accounts"></div>
+
+  <div class="actions">
+    <button class="act" id="btnAdd" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add money</button>
+    <button class="act" id="btnBuy" type="button"><svg viewBox="0 0 24 24"><path d="M6 7h12l-1 13H7L6 7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>Log purchase</button>
+    <button class="act" id="btnMove" type="button"><svg viewBox="0 0 24 24"><path d="M4 8h14l-4-4M20 16H6l4 4"/></svg>Move money</button>
+  </div>
+
+  <div class="goal">
+    <div class="goal-row"><h2 id="goalTitle">Savings goal</h2><button class="link" id="btnGoal" type="button">Set a goal</button></div>
+    <div class="bar" aria-hidden="true"><i id="goalBar"></i></div>
+    <div class="sub num" id="goalText">Pick something to save for and watch savings fill this bar.</div>
+  </div>
+
+  <section class="activity">
+    <div class="act-head"><h2>Activity</h2><div class="chips" id="chips" role="group" aria-label="Filter activity"></div></div>
+    <div class="list" id="list"></div>
+  </section>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function(){
+const CFG = window.FAMILY_CONFIG;
+const ACCTS = [{id:"spending",name:"Spending"},{id:"savings",name:"Savings"},{id:"gift",name:"Gifts"}];
+const ICON = {
+  deposit:'<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  purchase:'<svg viewBox="0 0 24 24"><path d="M6 7h12l-1 13H7L6 7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>',
+  transfer:'<svg viewBox="0 0 24 24"><path d="M4 8h14l-4-4M20 16H6l4 4"/></svg>'
+};
+const $ = s => document.querySelector(s);
+const state = { pw:null, pin:null, tx:[], goal:null, filter:"all", receiptCache:{}, tab:"money",
+  ch:{chores:[], checks:[], settings:{allowance:0,spending:60,savings:30,gift:10}, payouts:[], today:null}, wk:0, day:null };
+const mkStore = KEY => ({ get(){ try{return localStorage.getItem(KEY);}catch(e){return null;} },
+  set(v){ try{localStorage.setItem(KEY,v);}catch(e){} }, clear(){ try{localStorage.removeItem(KEY);}catch(e){} } });
+const store = mkStore("taliya-money-pw"), pinStore = mkStore("taliya-money-pin");
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+/* ---------- helpers ---------- */
+const fmt = c => { const neg=c<0; c=Math.abs(c); return (neg?"−":"")+"$"+Math.floor(c/100).toLocaleString("en-US")+"."+String(c%100).padStart(2,"0"); };
+const acctName = id => (ACCTS.find(a=>a.id===id)||{name:id}).name;
+const ymd = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const today = () => ymd(new Date());
+const toCents = v => { const s=String(v).replace(/[^0-9.]/g,""); if(!/^\d*\.?\d*$/.test(s)||s==="") return NaN; return Math.round(Number(s)*100); };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function dayLabel(d){
+  if (d===today()) return "Today";
+  const y=new Date(); y.setDate(y.getDate()-1); if (d===ymd(y)) return "Yesterday";
+  const [Y,M,D]=d.split("-").map(Number);
+  return new Date(Y,M-1,D).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:Y===new Date().getFullYear()?undefined:"numeric"});
+}
+function toast(m){ const t=$("#toast"); t.textContent=m; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2400); }
+function notice(m){ $("#notice").textContent=m||""; $("#notice").hidden=!m; }
+
+/* ---------- server ---------- */
+async function rpc(fn, args){
+  let res;
+  try {
+    res = await fetch(CFG.SUPABASE_URL.replace(/\/$/,"") + "/rest/v1/rpc/" + fn, {
+      method:"POST",
+      headers: Object.assign({ "apikey":CFG.SUPABASE_ANON_KEY, "Content-Type":"application/json" },
+        /^eyJ/.test(CFG.SUPABASE_ANON_KEY) ? { "Authorization":"Bearer "+CFG.SUPABASE_ANON_KEY } : {}),
+      body: JSON.stringify(args)
+    });
+  } catch(e){ throw {code:"offline"}; }
+  const text = await res.text();
+  if (!res.ok){
+    let msg = text; try { msg = JSON.parse(text).message || text; } catch(e){}
+    const m = String(msg).trim();
+    if (m==="wrong_pin" && fn!=="fm_parent_ok"){ state.pin=null; pinStore.clear(); renderParentBtn(); }  // PIN was changed
+    throw {code: /^[a-z_]+$/.test(m) ? m : "server", message:m};
+  }
+  return text ? JSON.parse(text) : null;
+}
+const ERR = {
+  offline:"Can't reach the server. Check your internet connection and try again.",
+  wrong_password:"That password didn't work.",
+  wrong_pin:"That parent PIN didn't work.",
+  parent_only:"Only a parent can do that. Tap Parent and enter the PIN first.",
+  week_paid:"This week has already been paid, so its chores are locked.",
+  future_day:"You can't check off a chore for a day that hasn't happened yet.",
+  not_scheduled:"That chore isn't scheduled for this day.",
+  already_paid:"This week has already been paid.",
+  no_allowance:"Set the weekly allowance first.",
+  no_chores:"There are no chores scheduled this week, so there's nothing to pay.",
+  bad_split:"The split has to add up to 100%.",
+  future_week:"You can't pay a week that hasn't started.",
+  bad_days:"Pick at least one day.", bad_name:"Give the chore a name."
+};
+function errMsg(e){
+  if (typeof e==="string") return e;
+  return (e && ERR[e.code]) || "That didn't save. Try again in a moment.";
+}
+function weekStart(ds){ const [Y,M,D]=ds.split("-").map(Number); const d=new Date(Y,M-1,D); d.setDate(d.getDate()-d.getDay()); return ymd(d); }
+function addDays(ds,n){ const [Y,M,D]=ds.split("-").map(Number); const d=new Date(Y,M-1,D+n); return ymd(d); }
+async function load(){
+  const from = addDays(weekStart(today()), -7*9);
+  const [r, c] = await Promise.all([ rpc("fm_load", {p_pw: state.pw}), rpc("fm_load_chores", {p_pw: state.pw, p_from: from}) ]);
+  state.tx = (r.tx||[]).map(t => ({...t, created_at:Number(t.created_at)}));
+  state.goal = r.goal;
+  state.ch = { chores:c.chores||[], checks:(c.checks||[]).map(k=>({...k,checked_at:Number(k.checked_at)})), settings:c.settings||state.ch.settings, payouts:c.payouts||[], today:c.today||today() };
+  render(); renderChores();
+}
+
+/* ---------- balances & render ---------- */
+function balances(){
+  const b={spending:0,savings:0,gift:0};
+  for (const t of state.tx){
+    if (t.type==="deposit") b[t.account]+=t.amount;
+    else if (t.type==="purchase") b[t.account]-=t.amount;
+    else if (t.type==="transfer"){ b[t.account]-=t.amount; b[t.to_account]+=t.amount; }
+  }
+  return b;
+}
+function render(){
+  const b=balances(), total=b.spending+b.savings+b.gift, tf=fmt(total), dot=tf.lastIndexOf(".");
+  $("#total").innerHTML = esc(tf.slice(0,dot))+"<small>"+esc(tf.slice(dot))+"</small>";
+  $("#accounts").innerHTML = ACCTS.map(a=>`<button type="button" class="acct t-${a.id}" data-acct="${a.id}" aria-pressed="${state.filter===a.id}">
+    <span class="lbl"><span class="dot"></span>${a.name}</span><span class="amt num">${fmt(b[a.id])}</span></button>`).join("");
+
+  const g=state.goal;
+  if (g && g.target>0){
+    const pct=Math.max(0,Math.min(100,Math.round(b.savings/g.target*100))), left=g.target-b.savings;
+    $("#goalTitle").textContent="Saving for: "+g.name;
+    $("#goalBar").style.width=pct+"%";
+    $("#goalText").textContent = left>0 ? `${fmt(b.savings)} of ${fmt(g.target)} · ${fmt(left)} to go (${pct}%)` : `Goal reached! ${fmt(b.savings)} saved of ${fmt(g.target)}`;
+    $("#btnGoal").textContent="Change";
+  } else {
+    $("#goalTitle").textContent="Savings goal"; $("#goalBar").style.width="0";
+    $("#goalText").textContent="Pick something to save for and watch savings fill this bar.";
+    $("#btnGoal").textContent="Set a goal";
+  }
+
+  const opts=[["all","All"],["spending","Spending"],["savings","Savings"],["gift","Gifts"],["receipts","Receipts"]];
+  $("#chips").innerHTML = opts.map(([k,l])=>`<button type="button" class="chip" data-filter="${k}" aria-pressed="${state.filter===k}">${l}</button>`).join("");
+
+  const f=state.filter;
+  let rows=state.tx.slice();
+  if (f==="receipts") rows=rows.filter(t=>t.has_receipt);
+  else if (f!=="all") rows=rows.filter(t=>t.account===f||t.to_account===f);
+  rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.created_at||0)-(a.created_at||0));
+
+  if (!rows.length){
+    $("#list").innerHTML = state.tx.length
+      ? `<div class="empty"><b>Nothing here yet</b><span>No ${f==="receipts"?"purchases with receipts":acctName(f).toLowerCase()+" activity"} so far.</span></div>`
+      : `<div class="empty"><b>No activity yet</b><span>Start with Taliya's current balances: tap <strong>Add money</strong> and enter what's in each account today as an opening balance.</span></div>`;
+    return;
+  }
+  let html="", last=null;
+  for (const t of rows){
+    if (t.date!==last){ html+=`<div class="day">${esc(dayLabel(t.date))}</div>`; last=t.date; }
+    let title, sub, sign="", tone=t.account;
+    if (t.type==="deposit"){ title=t.note||"Money added"; sub=`Into ${acctName(t.account)}`+(t.from_who?` · from ${t.from_who}`:""); sign="+"; }
+    else if (t.type==="purchase"){ title=t.store||"Purchase"; sub=acctName(t.account)+(t.note?` · ${t.note}`:""); sign="−"; }
+    else { title=`${acctName(t.account)} → ${acctName(t.to_account)}`; sub=t.note||"Moved money"; tone=t.to_account; if(f===t.account)sign="−"; else if(f===t.to_account)sign="+"; }
+    const tags = (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.has_receipt?'<span class="tag">Receipt</span>':"");
+    html+=`<button type="button" class="row t-${tone}" data-detail="${esc(t.id)}">
+      <span class="ico">${ICON[t.type]}</span>
+      <span class="what"><b>${esc(title)}</b><span>${esc(sub)}</span></span>
+      <span class="right"><span class="money num ${sign==="+"?"plus":""}">${sign}${fmt(t.amount)}</span>${tags?`<span class="tags">${tags}</span>`:""}</span>
+    </button>`;
+  }
+  $("#list").innerHTML=html;
+}
+
+/* ---------- sheets ---------- */
+function openSheet(html, mount){
+  $("#sheet").innerHTML=html; $("#scrim").hidden=false; document.body.style.overflow="hidden";
+  mount && mount($("#sheet"));
+}
+function closeSheet(){ $("#scrim").hidden=true; $("#sheet").innerHTML=""; document.body.style.overflow=""; }
+$("#scrim").addEventListener("click", e=>{ if(e.target.id==="scrim") closeSheet(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && !$("#scrim").hidden) closeSheet(); });
+
+const seg = (name, checked, dis) => `<div class="seg" role="radiogroup">${ACCTS.map(a=>`<label class="t-${a.id}"><input type="radio" name="${name}" id="${name}-${a.id}" value="${a.id}" ${a.id===checked?"checked":""} ${a.id===dis?"disabled":""}><span>${a.name}</span></label>`).join("")}</div>`;
+const footer = l => `<div class="err" id="err" role="alert"></div><div class="btns"><button type="button" class="btn ghost" data-close>Cancel</button><button type="submit" class="btn primary" id="submitBtn">${l}</button></div>`;
+const amountField = () => `<label class="f">Amount<input class="amount-in num" id="f-amount" name="amount" inputmode="decimal" placeholder="$0.00" autocomplete="off" required></label>`;
+const dateField = () => `<label class="f">Date<input type="date" id="f-date" name="date" value="${today()}" max="${today()}" required></label>`;
+const receiptField = () => `<label class="f">Receipt<button type="button" class="receipt-pick" id="pick"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>Take or choose a photo (optional)</span></button><input type="file" id="f-receipt" accept="image/*" hidden></label>`;
+function bindPicker(el){
+  const fi=el.querySelector("#f-receipt"), pick=el.querySelector("#pick");
+  pick.addEventListener("click", ()=>fi.click());
+  fi.addEventListener("change", ()=>{ const f=fi.files[0]; if(!f) return; pick.innerHTML=`<img src="${URL.createObjectURL(f)}" alt=""><span>Receipt attached · tap to change</span>`; });
+  return fi;
+}
+
+function bindForm(el, build, done){
+  el.querySelector("[data-close]").addEventListener("click", closeSheet);
+  el.querySelector("form").addEventListener("submit", async e=>{
+    e.preventDefault();
+    const err=el.querySelector("#err"), btn=el.querySelector("#submitBtn"), label=btn.textContent;
+    err.textContent=""; btn.disabled=true; btn.textContent="Saving…";
+    try { await build(new FormData(e.target)); closeSheet(); toast(done); await load(); }
+    catch(ex){ err.textContent=errMsg(ex); btn.disabled=false; btn.textContent=label; }
+  });
+}
+
+async function compress(file){
+  const bmp = await createImageBitmap(file);
+  const s = Math.min(1, 1200/Math.max(bmp.width,bmp.height));
+  const c = document.createElement("canvas"); c.width=Math.round(bmp.width*s); c.height=Math.round(bmp.height*s);
+  c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+  return c.toDataURL("image/jpeg",0.72);
+}
+async function saveReceipt(id, file){
+  let data;
+  try { data = await compress(file); } catch(e){ throw "That photo couldn't be read. Try a different one."; }
+  await rpc("fm_save_receipt",{p_pw:state.pw,p_id:id,p_image:data});
+  state.receiptCache[id]=data;
+}
+
+function sheetAdd(){
+  openSheet(`<h3>Add money</h3><form>${amountField()}
+    <label class="f">Into${seg("account","spending")}</label>
+    <div class="two"><label class="f">From<input id="f-from" name="from" placeholder="Allowance, Grandma…" maxlength="60"></label>${dateField()}</div>
+    <label class="f">Note<input id="f-note" name="note" placeholder="Weekly allowance, birthday…" maxlength="80"></label>
+    ${footer("Add money")}</form>`, el => bindForm(el, async fd=>{
+      const amount=toCents(fd.get("amount")); if(!(amount>0)) throw "Enter an amount greater than $0.";
+      await rpc("fm_add",{p_pw:state.pw,p_pin:state.pin,p:{type:"deposit",account:fd.get("account"),amount,from_who:fd.get("from").trim(),note:fd.get("note").trim(),date:fd.get("date")}});
+    }, "Money added"));
+}
+function sheetBuy(){
+  openSheet(`<h3>Log a purchase</h3><form>${amountField()}
+    <label class="f">Paid from${seg("account","spending")}</label>
+    <div class="two"><label class="f">Store<input id="f-store" name="store" placeholder="Target, Amazon…" maxlength="60" required></label>${dateField()}</div>
+    <label class="f">What was it?<input id="f-note" name="note" placeholder="Phone case, movie ticket…" maxlength="80"></label>
+    ${receiptField()}${footer("Log purchase")}</form>`, el=>{
+      const fi=bindPicker(el);
+      bindForm(el, async fd=>{
+        const amount=toCents(fd.get("amount")); if(!(amount>0)) throw "Enter an amount greater than $0.";
+        const account=fd.get("account"), bal=balances()[account];
+        if (amount>bal) throw `${acctName(account)} only has ${fmt(bal)}. Move money in first, or pick another account.`;
+        const st=fd.get("store").trim(); if(!st) throw "Add the store name.";
+        const id = await rpc("fm_add",{p_pw:state.pw,p_pin:state.pin,p:{type:"purchase",account,amount,store:st,note:fd.get("note").trim(),date:fd.get("date")}});
+        if (fi.files[0]) { try { await saveReceipt(id, fi.files[0]); } catch(e){ toast("Purchase saved, but the receipt didn't upload. Add it from Details."); } }
+      }, "Purchase logged");
+  });
+}
+function sheetMove(){
+  openSheet(`<h3>Move money</h3><form>${amountField()}
+    <label class="f">From${seg("account","spending")}</label>
+    <label class="f">To${seg("to","savings","spending")}</label>
+    <label class="f">Note<input id="f-note" name="note" placeholder="Saving toward goal…" maxlength="80"></label>
+    ${footer("Move money")}</form>`, el=>{
+      const sync=()=>{ const from=el.querySelector('input[name=account]:checked').value;
+        el.querySelectorAll('input[name=to]').forEach(r=>{ r.disabled=r.value===from; if(r.disabled&&r.checked) r.checked=false; });
+        if(!el.querySelector('input[name=to]:checked')) el.querySelector('input[name=to]:not(:disabled)').checked=true; };
+      el.querySelectorAll('input[name=account]').forEach(r=>r.addEventListener("change",sync));
+      bindForm(el, async fd=>{
+        const amount=toCents(fd.get("amount")); if(!(amount>0)) throw "Enter an amount greater than $0.";
+        const account=fd.get("account"), to=fd.get("to"), bal=balances()[account];
+        if (amount>bal) throw `${acctName(account)} only has ${fmt(bal)}.`;
+        await rpc("fm_add",{p_pw:state.pw,p_pin:state.pin,p:{type:"transfer",account,to_account:to,amount,note:fd.get("note").trim()}});
+      }, "Money moved");
+  });
+}
+function sheetGoal(){
+  const g=state.goal||{};
+  openSheet(`<h3>Savings goal</h3><form>
+    <label class="f">Saving for<input id="f-gname" name="gname" value="${esc(g.name||"")}" placeholder="New bike, concert tickets…" maxlength="50" required></label>
+    <label class="f">Goal amount<input class="amount-in num" id="f-gtarget" name="target" inputmode="decimal" value="${g.target?(g.target/100).toFixed(2):""}" placeholder="$0.00" required></label>
+    <div class="err" id="err" role="alert"></div>
+    <div class="btns">${g.target?'<button type="button" class="btn danger" id="clearGoal">Remove</button>':'<button type="button" class="btn ghost" data-close>Cancel</button>'}<button type="submit" class="btn primary" id="submitBtn">Save goal</button></div>
+  </form>`, el=>{
+    el.querySelector("[data-close]")?.addEventListener("click", closeSheet);
+    el.querySelector("#clearGoal")?.addEventListener("click", async ()=>{
+      try { await rpc("fm_set_goal",{p_pw:state.pw,p_name:"",p_target:0}); closeSheet(); toast("Goal removed"); await load(); }
+      catch(e){ el.querySelector("#err").textContent=errMsg(e); }
+    });
+    el.querySelector("form").addEventListener("submit", async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.target), err=el.querySelector("#err"), name=fd.get("gname").trim(), target=toCents(fd.get("target"));
+      if(!name) return err.textContent="Name the goal.";
+      if(!(target>0)) return err.textContent="Enter a goal amount greater than $0.";
+      try { await rpc("fm_set_goal",{p_pw:state.pw,p_name:name,p_target:target}); closeSheet(); toast("Goal saved"); await load(); }
+      catch(ex){ err.textContent=errMsg(ex); }
+    });
+  });
+}
+function sheetDetail(id){
+  const t=state.tx.find(x=>x.id===id); if(!t) return;
+  const kind={deposit:"Money added",purchase:"Purchase",transfer:"Moved money"}[t.type];
+  const rows=[["Amount",fmt(t.amount)],["Date",dayLabel(t.date)]];
+  if (t.type==="transfer") rows.push(["From",acctName(t.account)],["To",acctName(t.to_account)]);
+  else rows.push([t.type==="deposit"?"Into":"Paid from",acctName(t.account)]);
+  if (t.from_who) rows.push(["From",t.from_who]);
+  if (t.source==="apple pay") rows.push(["Logged by","Apple Pay (automatic)"]);
+  const editable = t.type==="purchase";
+  openSheet(`<div class="detail"><h3>${esc(t.store||kind)}</h3>
+    <div id="rslot">${t.has_receipt?'<div class="sub">Loading receipt…</div>':""}</div>
+    <dl>${rows.map(([k,v])=>`<dt>${k}</dt><dd class="num">${esc(v)}</dd>`).join("")}</dl>
+    <form id="editForm">
+      ${editable?`<label class="f">Store<input id="e-store" name="store" value="${esc(t.store||"")}" maxlength="60"></label>
+      <label class="f">What was it?<input id="e-note" name="note" value="${esc(t.note||"")}" maxlength="80" placeholder="Phone case, movie ticket…"></label>
+      ${receiptField()}`:(t.note?`<dl><dt>Note</dt><dd>${esc(t.note)}</dd></dl>`:"")}
+      <div class="err" id="err" role="alert"></div>
+      <div class="btns"><button type="button" class="btn danger" id="delBtn">Delete</button>${editable?'<button type="submit" class="btn primary" id="saveBtn">Save</button>':'<button type="button" class="btn ghost" data-close>Close</button>'}</div>
+    </form></div>`, async el=>{
+    el.querySelector("[data-close]")?.addEventListener("click", closeSheet);
+    const fi = editable ? bindPicker(el) : null;
+    if (editable && t.has_receipt) el.querySelector("#pick span").textContent="Replace receipt photo";
+    const err=el.querySelector("#err");
+    const del=el.querySelector("#delBtn"); let armed=false;
+    del.addEventListener("click", async ()=>{
+      if(!state.pin){ requireParent(()=>sheetDetail(id)); return; }
+      if(!armed){ armed=true; del.textContent="Tap again to delete"; return; }
+      del.disabled=true;
+      try { await rpc("fm_delete",{p_pw:state.pw,p_id:t.id,p_pin:state.pin}); closeSheet(); toast("Entry deleted"); await load(); }
+      catch(e){ err.textContent=errMsg(e); del.disabled=false; }
+    });
+    el.querySelector("#editForm").addEventListener("submit", async e=>{
+      e.preventDefault(); if(!editable) return;
+      const btn=el.querySelector("#saveBtn"); btn.disabled=true; btn.textContent="Saving…";
+      try {
+        const fd=new FormData(e.target);
+        await rpc("fm_update_note",{p_pw:state.pw,p_id:t.id,p_store:fd.get("store").trim(),p_note:fd.get("note").trim()});
+        if (fi.files[0]) await saveReceipt(t.id, fi.files[0]);
+        closeSheet(); toast("Saved"); await load();
+      } catch(ex){ err.textContent=errMsg(ex); btn.disabled=false; btn.textContent="Save"; }
+    });
+    if (t.has_receipt){
+      try {
+        const img = state.receiptCache[t.id] || await rpc("fm_receipt",{p_pw:state.pw,p_id:t.id});
+        if (img){ state.receiptCache[t.id]=img; const slot=el.querySelector("#rslot"); if(slot) slot.innerHTML=`<img class="rimg" src="${img}" alt="Receipt">`; }
+      } catch(e){ const slot=el.querySelector("#rslot"); if(slot) slot.innerHTML='<div class="sub">The receipt photo couldn\'t load.</div>'; }
+    }
+  });
+}
+
+/* ---------- parent mode ---------- */
+function renderParentBtn(){ const b=$("#btnParent"); b.textContent = state.pin ? "Parent ✓" : "Parent"; b.classList.toggle("on", !!state.pin); }
+function requireParent(then){
+  if (state.pin){ then && then(); return; }
+  openSheet(`<h3>Parent PIN</h3><form>
+    <label class="f">Enter the parent PIN<input type="password" id="f-pin" name="pin" inputmode="numeric" autocomplete="off" required></label>
+    <label class="check"><input type="checkbox" id="f-rememberpin" name="remember"> Remember on this phone (parents' phones only)</label>
+    ${footer("Unlock")}</form>`, el=>{
+    setTimeout(()=>el.querySelector("#f-pin").focus(),60);
+    el.querySelector("[data-close]").addEventListener("click", closeSheet);
+    el.querySelector("form").addEventListener("submit", async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.target), pin=fd.get("pin"), err=el.querySelector("#err"), btn=el.querySelector("#submitBtn");
+      btn.disabled=true; btn.textContent="Checking…";
+      try {
+        const ok = await rpc("fm_parent_ok",{p_pw:state.pw,p_pin:pin});
+        if (!ok) throw {code:"wrong_pin"};
+        state.pin=pin; if (fd.get("remember")) pinStore.set(pin);
+        renderParentBtn(); closeSheet(); render(); renderChores(); toast("Parent mode on");
+        then && then();
+      } catch(ex){ err.textContent=errMsg(ex); btn.disabled=false; btn.textContent="Unlock"; }
+    });
+  });
+}
+$("#btnParent").addEventListener("click", ()=>{
+  if (state.pin){ state.pin=null; pinStore.clear(); renderParentBtn(); renderChores(); toast("Parent mode off"); }
+  else requireParent();
+});
+
+/* ---------- chores ---------- */
+const scheduledOn = (ch, ds) => ch.days.includes(new Date(...ds.split("-").map((v,i)=>i===1?v-1:+v)).getDay());
+const isDone = (cid, ds) => state.ch.checks.find(k=>k.chore_id===cid && k.date===ds);
+function weekStats(ws){
+  let total=0, done=0;
+  for (let i=0;i<7;i++){ const ds=addDays(ws,i); for (const c of state.ch.chores){ if (scheduledOn(c,ds)){ total++; if (isDone(c.id,ds)) done++; } } }
+  const s=state.ch.settings, amount = total ? Math.round(s.allowance*done/total) : 0;
+  const sp=Math.round(amount*s.spending/100); let sv=Math.round(amount*s.savings/100); let gf=amount-sp-sv;
+  if (s.gift===0){ sv+=gf; gf=0; }
+  return {total, done, pct: total?Math.round(100*done/total):0, amount, sp, sv, gf};
+}
+function shortDate(ds){ const [Y,M,D]=ds.split("-").map(Number); return new Date(Y,M-1,D).toLocaleDateString("en-US",{month:"short",day:"numeric"}); }
+function renderChores(){
+  const td = state.ch.today || today(), thisWk = weekStart(td), ws = addDays(thisWk, 7*state.wk);
+  if (!state.day || weekStart(state.day)!==ws) state.day = state.wk===0 ? td : ws;
+  $("#wkLabel").innerHTML = `${state.wk===0?"This week":state.wk===-1?"Last week":"Week of "+shortDate(ws)}<span>${shortDate(ws)} – ${shortDate(addDays(ws,6))}</span>`;
+  $("#wkPrev").disabled = state.wk <= -8; $("#wkNext").disabled = state.wk >= 0;
+
+  const st = weekStats(ws), s = state.ch.settings, paid = state.ch.payouts.find(p=>p.week_start===ws);
+  let sum = `<div class="goal-row"><h2>Chores done</h2><span class="sub num">${st.done} of ${st.total}</span></div>
+    <div class="big num">${st.pct}%</div><div class="bar ch" aria-hidden="true"><i style="width:${st.pct}%"></i></div>`;
+  if (paid){
+    sum += `<div class="paid num">Paid ${fmt(paid.amount)} for ${Math.round(100*paid.done/paid.total)}% of chores</div>
+      <div class="split"><span class="pill t-spending num">Spending ${fmt(paid.spending)}</span><span class="pill t-savings num">Savings ${fmt(paid.savings)}</span><span class="pill t-gift num">Gifts ${fmt(paid.gift)}</span></div>`;
+  } else if (s.allowance>0){
+    sum += `<div class="sub num">${state.wk===0?"On track to earn":"Earned"} <b>${fmt(st.amount)}</b> of the ${fmt(s.allowance)} weekly allowance</div>
+      <div class="split"><span class="pill t-spending num">Spending ${fmt(st.sp)}</span><span class="pill t-savings num">Savings ${fmt(st.sv)}</span><span class="pill t-gift num">Gifts ${fmt(st.gf)}</span></div>`;
+  } else {
+    sum += `<div class="sub">No weekly allowance set yet. A parent can set it below.</div>`;
+  }
+  $("#wkSummary").innerHTML = sum;
+
+  $("#days").innerHTML = Array.from({length:7},(_,i)=>{
+    const ds=addDays(ws,i), list=state.ch.chores.filter(c=>scheduledOn(c,ds)), dn=list.filter(c=>isDone(c.id,ds)).length;
+    return `<button type="button" class="dbtn ${ds===td?"today":""} ${list.length&&dn===list.length?"full":""}" data-day="${ds}" aria-pressed="${ds===state.day}" aria-label="${DAYS[i]} ${shortDate(ds)}, ${dn} of ${list.length} done">
+      <small>${DAYS[i].slice(0,2)}</small><b class="num">${Number(ds.slice(8))}</b><i class="num">${list.length?dn+"/"+list.length:"–"}</i></button>`;
+  }).join("");
+
+  const day = state.day, list = state.ch.chores.filter(c=>scheduledOn(c,day));
+  const future = day > td, locked = !!paid || (state.wk<0 && !state.pin);
+  if (!state.ch.chores.length){
+    $("#choreList").innerHTML = `<div class="empty"><b>No chores yet</b><span>A parent can add chores and pick which days they happen. Tap <strong>Parent</strong> at the top to start.</span></div>`;
+  } else if (!list.length){
+    $("#choreList").innerHTML = `<div class="empty"><b>Nothing scheduled</b><span>No chores on ${DAYS[new Date(...day.split("-").map((v,i)=>i===1?v-1:+v)).getDay()]}. Enjoy the day off.</span></div>`;
+  } else {
+    $("#choreList").innerHTML = list.map(c=>{
+      const k=isDone(c.id,day);
+      const when = k ? "Done " + new Date(k.checked_at).toLocaleString("en-US",{weekday:"short",hour:"numeric",minute:"2-digit"}) : future ? "Coming up" : locked ? (paid?"Week paid":"Not done") : "Tap to check off";
+      return `<button type="button" class="crow ${k?"done":""}" data-chore="${c.id}" ${future||locked?"disabled":""} aria-pressed="${!!k}">
+        <span class="box"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+        <span><span class="cname">${esc(c.name)}</span><span class="cwhen">${esc(when)}</span></span></button>`;
+    }).join("");
+  }
+
+  // parent tools
+  if (!state.pin){
+    $("#parentTools").innerHTML = `<p class="hint">Parents: tap <strong>Parent</strong> at the top to edit chores, set the allowance and pay the week.</p>`;
+    return;
+  }
+  const canPay = !paid && st.total>0 && s.allowance>0;
+  $("#parentTools").innerHTML = `
+    <div class="card"><div class="goal-row"><h2>Payday</h2>${paid?'<span class="paid">Paid</span>':""}</div>
+      ${paid ? `<div class="sub">This week was paid on ${shortDate(String(paid.paid_at).slice(0,10))}.</div>` :
+        `<div class="sub num">Pays ${fmt(st.amount)} (${st.pct}% of ${fmt(s.allowance)}) into her accounts. ${state.wk===0?"The week isn't over yet, so unchecked chores count as missed.":""}</div>
+         <div class="err" id="payErr" role="alert"></div>
+         <button type="button" class="btn primary" id="btnPay" ${canPay?"":"disabled"}>Pay ${fmt(st.amount)}</button>`}
+    </div>
+    <div class="card"><div class="goal-row"><h2>Weekly allowance</h2><button type="button" class="link" id="btnAllow">Change</button></div>
+      <div class="sub num">${fmt(s.allowance)} per week · ${s.spending}% spending · ${s.savings}% savings · ${s.gift}% gifts</div></div>
+    <div class="card" style="padding:0;gap:0"><div class="goal-row" style="padding:16px 16px 8px"><h2>Chores</h2><button type="button" class="link" id="btnNewChore">Add chore</button></div>
+      <div>${state.ch.chores.map(c=>`<div class="erow"><div><b>${esc(c.name)}</b><span>${c.days.length===7?"Every day":c.days.map(d=>DAYS[d]).join(", ")}</span></div><button type="button" class="link" data-editchore="${c.id}">Edit</button></div>`).join("") || '<div class="erow"><span>No chores yet.</span></div>'}</div></div>`;
+  $("#btnAllow").addEventListener("click", sheetAllowance);
+  $("#btnNewChore").addEventListener("click", ()=>sheetChore());
+  const pay=$("#btnPay");
+  if (pay){ let armed=false; pay.addEventListener("click", async ()=>{
+    if(!armed){ armed=true; pay.textContent=`Tap again to pay ${fmt(st.amount)}`; return; }
+    pay.disabled=true; pay.textContent="Paying…";
+    try { const r = await rpc("fm_pay_week",{p_pw:state.pw,p_pin:state.pin,p_week:ws}); toast(`Paid ${fmt(r.amount)}`); await load(); }
+    catch(e){ $("#payErr").textContent=errMsg(e); pay.disabled=false; pay.textContent=`Pay ${fmt(st.amount)}`; }
+  }); }
+}
+async function toggleChore(cid){
+  const day=state.day, was=!!isDone(cid,day);
+  // instant feedback
+  if (was) state.ch.checks = state.ch.checks.filter(k=>!(k.chore_id===cid&&k.date===day));
+  else state.ch.checks.push({chore_id:cid,date:day,checked_at:Date.now()});
+  renderChores();
+  try { await rpc("fm_toggle_chore",{p_pw:state.pw,p_chore:cid,p_date:day,p_done:!was,p_pin:state.pin}); if(!was) toast("Nice work!"); }
+  catch(e){ toast(errMsg(e)); }
+  try { await load(); } catch(e){}
+}
+function sheetChore(id){
+  const c = id ? state.ch.chores.find(x=>x.id===id) : {name:"",days:[]};
+  openSheet(`<h3>${id?"Edit chore":"Add a chore"}</h3><form>
+    <label class="f">Chore<input id="f-cname" name="name" value="${esc(c.name)}" placeholder="Unload dishwasher, feed the dog…" maxlength="60" required></label>
+    <label class="f">Which days?<div class="dpick">${DAYS.map((d,i)=>`<label><input type="checkbox" name="d" id="f-d${i}" value="${i}" ${c.days.includes(i)?"checked":""}><span>${d.slice(0,2)}</span></label>`).join("")}</div></label>
+    <button type="button" class="link" id="everyDay" style="align-self:flex-start">Select every day</button>
+    <div class="err" id="err" role="alert"></div>
+    <div class="btns">${id?'<button type="button" class="btn danger" id="rmChore">Remove</button>':'<button type="button" class="btn ghost" data-close>Cancel</button>'}<button type="submit" class="btn primary" id="submitBtn">Save</button></div>
+  </form>`, el=>{
+    el.querySelector("[data-close]")?.addEventListener("click", closeSheet);
+    el.querySelector("#everyDay").addEventListener("click", ()=>el.querySelectorAll('input[name=d]').forEach(x=>x.checked=true));
+    const rm=el.querySelector("#rmChore"); let armed=false;
+    rm && rm.addEventListener("click", async ()=>{
+      if(!armed){ armed=true; rm.textContent="Tap again to remove"; return; }
+      try { await rpc("fm_chore_remove",{p_pw:state.pw,p_pin:state.pin,p_id:id}); closeSheet(); toast("Chore removed"); await load(); }
+      catch(e){ el.querySelector("#err").textContent=errMsg(e); }
+    });
+    el.querySelector("form").addEventListener("submit", async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.target), days=fd.getAll("d").map(Number), name=fd.get("name").trim(), err=el.querySelector("#err");
+      if(!name) return err.textContent=ERR.bad_name;
+      if(!days.length) return err.textContent=ERR.bad_days;
+      try { await rpc("fm_chore_save",{p_pw:state.pw,p_pin:state.pin,p_name:name,p_days:days,p_id:id||null}); closeSheet(); toast("Chore saved"); await load(); }
+      catch(ex){ err.textContent=errMsg(ex); }
+    });
+  });
+}
+function sheetAllowance(){
+  const s=state.ch.settings;
+  openSheet(`<h3>Weekly allowance</h3><form>
+    <label class="f">Full allowance (when every chore is done)<input class="amount-in num" id="f-allow" name="allow" inputmode="decimal" value="${s.allowance?(s.allowance/100).toFixed(2):""}" placeholder="$0.00" required></label>
+    <label class="f">How payday is split</label>
+    <div class="three">
+      <label class="f t-spending">Spending %<input id="f-sp" name="sp" inputmode="numeric" value="${s.spending}"></label>
+      <label class="f t-savings">Savings %<input id="f-sv" name="sv" inputmode="numeric" value="${s.savings}"></label>
+      <label class="f t-gift">Gifts %<input id="f-gf" name="gf" inputmode="numeric" value="${s.gift}"></label>
+    </div>
+    <div class="sub num" id="splitTotal"></div>
+    <p class="sub" style="margin:0">She earns the share of the allowance that matches the share of chores she finished. Finish 8 of 10 chores and she gets 80%.</p>
+    ${footer("Save")}</form>`, el=>{
+    const upd=()=>{ const t=["sp","sv","gf"].map(n=>parseInt(el.querySelector(`[name=${n}]`).value||"0",10)).reduce((a,b)=>a+b,0); el.querySelector("#splitTotal").textContent=`Total: ${t}%${t===100?"":" (needs to be 100%)"}`; };
+    el.querySelectorAll(".three input").forEach(i=>i.addEventListener("input",upd)); upd();
+    el.querySelector("[data-close]").addEventListener("click", closeSheet);
+    el.querySelector("form").addEventListener("submit", async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.target), err=el.querySelector("#err"), allow=toCents(fd.get("allow"));
+      const [sp,sv,gf]=["sp","sv","gf"].map(n=>parseInt(fd.get(n)||"0",10));
+      if(!(allow>=0)) return err.textContent="Enter the weekly allowance.";
+      if([sp,sv,gf].some(x=>isNaN(x)||x<0) || sp+sv+gf!==100) return err.textContent=ERR.bad_split;
+      try { await rpc("fm_allowance_save",{p_pw:state.pw,p_pin:state.pin,p_allowance:allow,p_spending:sp,p_savings:sv,p_gift:gf}); closeSheet(); toast("Allowance saved"); await load(); }
+      catch(ex){ err.textContent=errMsg(ex); }
+    });
+  });
+}
+function setTab(t){
+  state.tab=t; $("#tabMoney").setAttribute("aria-selected", t==="money"); $("#tabChores").setAttribute("aria-selected", t==="chores");
+  $("#moneyView").hidden = t!=="money"; $("#choresView").hidden = t!=="chores";
+  if (t==="chores") renderChores();
+}
+$("#tabMoney").addEventListener("click", ()=>setTab("money"));
+$("#tabChores").addEventListener("click", ()=>setTab("chores"));
+$("#wkPrev").addEventListener("click", ()=>{ state.wk--; state.day=null; renderChores(); });
+$("#wkNext").addEventListener("click", ()=>{ state.wk=Math.min(0,state.wk+1); state.day=null; renderChores(); });
+
+/* ---------- events ---------- */
+$("#btnAdd").addEventListener("click", ()=>requireParent(sheetAdd));
+$("#btnBuy").addEventListener("click", sheetBuy);
+$("#btnMove").addEventListener("click", ()=>requireParent(sheetMove));
+$("#btnGoal").addEventListener("click", sheetGoal);
+$("#btnLock").addEventListener("click", ()=>{ store.clear(); pinStore.clear(); state.pw=null; state.pin=null; state.tx=[]; renderParentBtn(); showLogin(); });
+document.addEventListener("click", e=>{
+  const a=e.target.closest("[data-acct]"); if(a){ state.filter = state.filter===a.dataset.acct?"all":a.dataset.acct; render(); return; }
+  const f=e.target.closest("[data-filter]"); if(f){ state.filter=f.dataset.filter; render(); return; }
+  const d=e.target.closest("[data-detail]"); if(d){ sheetDetail(d.dataset.detail); return; }
+  const dy=e.target.closest("[data-day]"); if(dy){ state.day=dy.dataset.day; renderChores(); return; }
+  const ck=e.target.closest("[data-chore]"); if(ck && !ck.disabled){ toggleChore(ck.dataset.chore); return; }
+  const ec=e.target.closest("[data-editchore]"); if(ec) sheetChore(ec.dataset.editchore);
+});
+
+/* ---------- login & refresh ---------- */
+function showLogin(msg){ $("#app").hidden=true; $("#login").hidden=false; $("#loginErr").textContent=msg||""; $("#pw").value=""; }
+function showApp(){ $("#login").hidden=true; $("#app").hidden=false; }
+$("#loginForm").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const btn=$("#loginBtn"); btn.disabled=true; btn.textContent="Opening…"; $("#loginErr").textContent="";
+  state.pw=$("#pw").value;
+  try { await load(); if($("#remember").checked) store.set(state.pw); showApp(); }
+  catch(ex){ state.pw=null; $("#loginErr").textContent=errMsg(ex); }
+  btn.disabled=false; btn.textContent="Open";
+});
+async function refresh(){
+  if (!state.pw || document.hidden) return;
+  try { await load(); notice(""); }
+  catch(e){ if(e.code==="wrong_password"){ store.clear(); state.pw=null; showLogin("The family password changed. Enter the new one."); } else notice(errMsg(e)); }
+}
+document.addEventListener("visibilitychange", refresh);
+setInterval(refresh, 30000);
+
+render();
+if (!CFG || /YOUR-/.test(CFG.SUPABASE_URL+CFG.SUPABASE_ANON_KEY)){
+  showLogin("This app isn't connected yet. Paste your Supabase URL and key into the SETUP section at the top of index.html.");
+  $("#loginBtn").disabled=true;
+} else {
+  const saved=store.get();
+  state.pin = pinStore.get(); renderParentBtn();
+  if (saved){ state.pw=saved; showApp(); load().catch(e=>{ if(e.code==="wrong_password"){ store.clear(); state.pw=null; showLogin("Enter the family password."); } else notice(errMsg(e)); }); }
+  else showLogin();
+}
+})();
+</script>
+</body>
+</html>
