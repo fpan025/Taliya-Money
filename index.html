@@ -838,6 +838,8 @@ function alertsCard(){
   return `<div class="card"><h2>Alerts on parents' phones</h2>
     <label class="sw" for="al-chores"><span>Chore completed<small>Each time Taliya checks off a chore</small></span><input type="checkbox" id="al-chores" ${a.chores?"checked":""}></label>
     <label class="sw" for="al-purch"><span>Purchases<small>Apple Pay taps and purchases she logs</small></span><input type="checkbox" id="al-purch" ${a.purchases?"checked":""}></label>
+    <div class="sw"><span>Preview the celebration<small>Plays it on this phone only. Nothing is saved or sent.</small></span></div>
+    <div class="btns"><button type="button" class="btn ghost small" id="al-prev-kid">Taliya's version</button><button type="button" class="btn ghost small" id="al-prev-parent">Parents' version</button></div>
     <label class="sw" for="al-showsetup"><span>Show phone setup<small>Steps, alert topic and test buttons</small></span><input type="checkbox" id="al-showsetup" ${showSetup()?"checked":""}></label>
     <div id="al-setup" style="display:flex;flex-direction:column;gap:10px" ${showSetup()?"":"hidden"}>
     <div class="sub" style="font-weight:700;color:var(--ink);margin-top:4px">Set up each parent's iPhone once</div>
@@ -863,6 +865,8 @@ const setupStore = mkStore("taliya-money-show-setup");
 function showSetup(){ return setupStore.get()==="1"; }
 function bindAlerts(){
   if (!state.alerts) return;
+  $("#al-prev-kid").addEventListener("click", ()=>celebrate(false, true));
+  $("#al-prev-parent").addEventListener("click", ()=>celebrate(true, true));
   $("#al-showsetup").addEventListener("change", e=>{
     if (e.target.checked) setupStore.set("1"); else setupStore.clear();
     $("#al-setup").hidden = !e.target.checked;
@@ -921,8 +925,8 @@ function maybeParentCheer(){
   cheerStore.set(td);
   celebrate(true);
 }
-function celebrate(forParent){
-  if (!forParent) cheerStore.set(state.ch.today || today());   // this phone already celebrated today
+function celebrate(forParent, preview){
+  if (!forParent && !preview) cheerStore.set(state.ch.today || today());   // this phone already celebrated today
   document.querySelector(".cheer")?.remove();
   const el=document.createElement("div"); el.className="cheer"; el.setAttribute("role","status");
   let hands="";
