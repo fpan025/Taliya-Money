@@ -207,6 +207,18 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:70
 ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
 .btn.small{padding:11px;font-size:15px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:600;font-size:14px;z-index:60}
+/* all-chores-done celebration */
+.cheer{position:fixed;inset:0;z-index:70;overflow:hidden;pointer-events:auto;display:grid;place-items:center;
+  background:color-mix(in srgb, var(--bg) 55%, transparent);animation:cheerfade 4.2s ease forwards}
+.cheer .hand{position:absolute;bottom:-90px;line-height:1;animation:rise linear forwards;will-change:transform}
+.cheer .msg{position:relative;max-width:min(86vw,420px);text-align:center;background:var(--surface);color:var(--ink);
+  border-radius:22px;padding:22px 24px;box-shadow:var(--shadow);font-family:var(--f-display);font-weight:800;
+  font-size:clamp(24px,7vw,32px);line-height:1.15;text-wrap:balance;animation:pop .5s cubic-bezier(.2,1.4,.4,1) both}
+.cheer .msg span{display:block;font-family:var(--f-body);font-weight:600;font-size:17px;color:var(--save);margin-top:8px}
+@keyframes rise{from{transform:translateY(0) rotate(-12deg)}50%{transform:translateY(-60vh) rotate(10deg)}to{transform:translateY(calc(-100vh - 140px)) rotate(-8deg)}}
+@keyframes pop{from{transform:scale(.6);opacity:0}to{transform:none;opacity:1}}
+@keyframes cheerfade{0%,85%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.cheer .hand{display:none}.cheer .msg{animation:none}}
 </style>
 </head>
 <body>
@@ -361,6 +373,8 @@ async function load(){
   state.bank = bk;
   state.ch = { chores:c.chores||[], checks:(c.checks||[]).map(k=>({...k,checked_at:Number(k.checked_at)})), settings:c.settings||state.ch.settings, payouts:c.payouts||[], today:c.today||today() };
   render(); renderChores();
+  maybeParentCheer();
+  saveAppUrl();
 }
 
 /* ---------- balances & render ---------- */
@@ -707,7 +721,7 @@ function requireParent(then){
         const ok = await rpc("fm_parent_ok",{p_pw:state.pw,p_pin:pin});
         if (!ok) throw {code:"wrong_pin"};
         state.pin=pin; if (fd.get("remember")) pinStore.set(pin);
-        renderParentBtn(); closeSheet(); render(); renderChores(); toast("Parent mode on");
+        renderParentBtn(); closeSheet(); render(); renderChores(); toast("Parent mode on"); maybeParentCheer();
         then && then();
       } catch(ex){ err.textContent=errMsg(ex); btn.disabled=false; btn.textContent="Unlock"; }
     });
@@ -824,6 +838,8 @@ function alertsCard(){
   return `<div class="card"><h2>Alerts on parents' phones</h2>
     <label class="sw" for="al-chores"><span>Chore completed<small>Each time Taliya checks off a chore</small></span><input type="checkbox" id="al-chores" ${a.chores?"checked":""}></label>
     <label class="sw" for="al-purch"><span>Purchases<small>Apple Pay taps and purchases she logs</small></span><input type="checkbox" id="al-purch" ${a.purchases?"checked":""}></label>
+    <label class="sw" for="al-showsetup"><span>Show phone setup<small>Steps, alert topic and test buttons</small></span><input type="checkbox" id="al-showsetup" ${showSetup()?"checked":""}></label>
+    <div id="al-setup" style="display:flex;flex-direction:column;gap:10px" ${showSetup()?"":"hidden"}>
     <div class="sub" style="font-weight:700;color:var(--ink);margin-top:4px">Set up each parent's iPhone once</div>
     <ol class="steps">
       <li>Install the free <b>ntfy</b> app from the App Store.</li>
@@ -834,6 +850,7 @@ function alertsCard(){
     <div class="sub">Keep the topic private. Anyone who has it can see these alerts.</div>
     <div class="err" id="al-err" role="alert"></div>
     <div class="btns"><button type="button" class="btn ghost small" id="al-test">Send test alert</button><button type="button" class="btn ghost small" id="al-new">New topic</button></div>
+    </div>
   </div>`;
 }
 async function loadAlerts(){
@@ -842,8 +859,14 @@ async function loadAlerts(){
   catch(e){ const el=$("#parentTools .card:last-child .sub"); if(el) el.textContent=errMsg(e); }
   loadAlerts.busy = false;
 }
+const setupStore = mkStore("taliya-money-show-setup");
+function showSetup(){ return setupStore.get()==="1"; }
 function bindAlerts(){
   if (!state.alerts) return;
+  $("#al-showsetup").addEventListener("change", e=>{
+    if (e.target.checked) setupStore.set("1"); else setupStore.clear();
+    $("#al-setup").hidden = !e.target.checked;
+  });
   const err=()=>$("#al-err");
   const save = async ()=>{
     const c=$("#al-chores").checked, p=$("#al-purch").checked;
@@ -869,13 +892,65 @@ function bindAlerts(){
 }
 function selectTopic(){ const el=$("#al-topic"); const r=document.createRange(); r.selectNodeContents(el); const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast("Topic selected. Tap Copy in the menu."); }
 
+const cheerStore = mkStore("taliya-money-cheer-seen");
+function todayAllDone(){
+  const td = state.ch.today || today(), list = state.ch.chores.filter(c=>scheduledOn(c,td));
+  return list.length>0 && list.every(c=>isDone(c.id,td));
+}
+// parents' phones: play once per day after Taliya finishes all of today's chores
+state.forceCheer = location.hash === "#cheer";
+window.addEventListener("hashchange", ()=>{ if (location.hash === "#cheer"){ state.forceCheer = true; maybeParentCheer(); } });
+function clearCheerHash(){ try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} }
+// remember this app's web address so the "all chores done" alert can open it
+function saveAppUrl(){
+  if (!state.pin) return;
+  const url = location.origin + location.pathname;
+  if (!/^https:/.test(url) || saveAppUrl.done === url) return;
+  saveAppUrl.done = url;
+  rpc("fm_set_app_url",{p_pw:state.pw,p_pin:state.pin,p_url:url}).catch(()=>{ saveAppUrl.done = null; });
+}
+function maybeParentCheer(){
+  if ($("#app").hidden) return;
+  const td = state.ch.today || today();
+  if (state.forceCheer){                       // opened from the "All chores done" alert
+    state.forceCheer = false; clearCheerHash();
+    if (todayAllDone()){ cheerStore.set(td); celebrate(true); return; }
+  }
+  if (!state.pin || !todayAllDone()) return;
+  if (cheerStore.get() === td) return;
+  cheerStore.set(td);
+  celebrate(true);
+}
+function celebrate(forParent){
+  if (!forParent) cheerStore.set(state.ch.today || today());   // this phone already celebrated today
+  document.querySelector(".cheer")?.remove();
+  const el=document.createElement("div"); el.className="cheer"; el.setAttribute("role","status");
+  let hands="";
+  for (let i=0;i<22;i++){
+    const left=Math.round(Math.random()*92), size=28+Math.round(Math.random()*34), dur=(2.4+Math.random()*1.4).toFixed(2), delay=(Math.random()*1.1).toFixed(2);
+    hands+=`<span class="hand" aria-hidden="true" style="left:${left}%;font-size:${size}px;animation-duration:${dur}s;animation-delay:${delay}s">👏</span>`;
+  }
+  el.innerHTML = hands + (forParent
+    ? `<div class="msg">Taliya finished all her chores today!</div>`
+    : `<div class="msg">Nice job, Taliya!<span>Keep up the great work!</span></div>`);
+  const close=()=>el.remove();
+  el.addEventListener("click", close);
+  el.addEventListener("animationend", e=>{ if (e.target===el) close(); });
+  document.body.appendChild(el);
+  setTimeout(close, 4500);
+}
 async function toggleChore(cid){
   const day=state.day, was=!!isDone(cid,day);
   // instant feedback
   if (was) state.ch.checks = state.ch.checks.filter(k=>!(k.chore_id===cid&&k.date===day));
   else state.ch.checks.push({chore_id:cid,date:day,checked_at:Date.now()});
   renderChores();
-  try { await rpc("fm_toggle_chore",{p_pw:state.pw,p_chore:cid,p_date:day,p_done:!was,p_pin:state.pin}); if(!was) toast("Nice work!"); }
+  const dayList = state.ch.chores.filter(c=>scheduledOn(c,day));
+  const allDone = !was && dayList.length>0 && dayList.every(c=>isDone(c.id,day));
+  try {
+    await rpc("fm_toggle_chore",{p_pw:state.pw,p_chore:cid,p_date:day,p_done:!was,p_pin:state.pin});
+    if (allDone) celebrate(); else if(!was) toast("Nice work!");
+  }
   catch(e){ toast(errMsg(e)); }
   try { await load(); } catch(e){}
 }
@@ -965,7 +1040,7 @@ $("#loginForm").addEventListener("submit", async e=>{
   e.preventDefault();
   const btn=$("#loginBtn"); btn.disabled=true; btn.textContent="Opening…"; $("#loginErr").textContent="";
   state.pw=$("#pw").value;
-  try { await load(); if($("#remember").checked) store.set(state.pw); showApp(); }
+  try { await load(); if($("#remember").checked) store.set(state.pw); showApp(); maybeParentCheer(); }
   catch(ex){ state.pw=null; $("#loginErr").textContent=errMsg(ex); }
   btn.disabled=false; btn.textContent="Open";
 });
