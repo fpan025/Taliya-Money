@@ -285,6 +285,7 @@ ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;f
     <div class="list" id="list"></div>
   </section>
   </div>
+  <p class="hint" id="appVersion" style="font-size:12px;margin:0"></p>
 </div>
 
 <div class="scrim" id="scrim" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
@@ -1054,6 +1055,27 @@ async function refresh(){
   catch(e){ if(e.code==="wrong_password"){ store.clear(); state.pw=null; showLogin("The family password changed. Enter the new one."); } else notice(errMsg(e)); }
 }
 document.addEventListener("visibilitychange", refresh);
+
+/* ---------- keep every phone on the newest version ---------- */
+const APP_VERSION = "2026-10-27.2";
+$("#appVersion").textContent = "App version " + APP_VERSION;
+async function checkForUpdate(){
+  if (document.hidden || !/^https?:/.test(location.protocol)) return;
+  if (!$("#scrim").hidden || document.querySelector(".cheer")) return;      // don't interrupt
+  try {
+    const res = await fetch(location.pathname + "?check=" + Date.now(), {cache:"no-store"});
+    if (!res.ok) return;
+    const m = (await res.text()).match(/const APP_VERSION = "([^"]+)"/);
+    if (m && m[1] !== APP_VERSION){
+      try { sessionStorage.setItem("taliya-money-updated", m[1]); } catch(e){}
+      location.reload();
+    }
+  } catch(e){ /* offline: try again later */ }
+}
+document.addEventListener("visibilitychange", checkForUpdate);
+setInterval(checkForUpdate, 15*60*1000);
+setTimeout(checkForUpdate, 3000);
+try { const u = sessionStorage.getItem("taliya-money-updated"); if (u){ sessionStorage.removeItem("taliya-money-updated"); setTimeout(()=>toast("App updated"), 600); } } catch(e){}
 setInterval(refresh, 30000);
 
 render();
