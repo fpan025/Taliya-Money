@@ -286,8 +286,11 @@ ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;f
   </section>
 
   <div class="card" id="famCard">
-    <label class="sw" for="fam-show"><span>Get money alerts on this phone<small>When a parent adds or moves Taliya's money</small></span><input type="checkbox" id="fam-show"></label>
+    <h2>Money alerts on this phone</h2>
+    <div class="sub">Get an alert when a parent adds money or moves money between Taliya's accounts.</div>
+    <label class="sw" for="fam-show"><span>Show phone setup<small>Steps, alert topic and test button</small></span><input type="checkbox" id="fam-show"></label>
     <div id="fam-body" style="display:flex;flex-direction:column;gap:10px" hidden>
+      <div class="sub" style="font-weight:700;color:var(--ink);margin-top:4px">Set up this iPhone once</div>
       <ol class="steps">
         <li>Install the free <b>ntfy</b> app from the App Store.</li>
         <li>Open it, tap <b>+</b>, and paste this topic. Leave the server as ntfy.sh.</li>
@@ -1104,7 +1107,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-01.2";
+const APP_VERSION = "2026-11-01.3";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
