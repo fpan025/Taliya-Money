@@ -284,6 +284,20 @@ ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;f
     <div class="act-head"><h2>Activity</h2><div class="chips" id="chips" role="group" aria-label="Filter activity"></div></div>
     <div class="list" id="list"></div>
   </section>
+
+  <div class="card" id="famCard">
+    <label class="sw" for="fam-show"><span>Get money alerts on this phone<small>When a parent adds or moves Taliya's money</small></span><input type="checkbox" id="fam-show"></label>
+    <div id="fam-body" style="display:flex;flex-direction:column;gap:10px" hidden>
+      <ol class="steps">
+        <li>Install the free <b>ntfy</b> app from the App Store.</li>
+        <li>Open it, tap <b>+</b>, and paste this topic. Leave the server as ntfy.sh.</li>
+      </ol>
+      <div class="topic"><code id="fam-topic">Loading…</code><button type="button" id="fam-copy">Copy</button></div>
+      <ol class="steps" start="3"><li>Tap <b>Subscribe</b> and allow notifications.</li></ol>
+      <div class="err" id="fam-err" role="alert"></div>
+      <button type="button" class="btn ghost small" id="fam-test">Send a test alert</button>
+    </div>
+  </div>
   </div>
   <p class="hint" id="appVersion" style="font-size:12px;margin:0"></p>
 </div>
@@ -374,6 +388,7 @@ async function load(){
   state.bank = bk;
   state.ch = { chores:c.chores||[], checks:(c.checks||[]).map(k=>({...k,checked_at:Number(k.checked_at)})), settings:c.settings||state.ch.settings, payouts:c.payouts||[], today:c.today||today() };
   render(); renderChores();
+  if (famStore.get()==="1" && $("#fam-body").hidden) openFamily(true);
   maybeParentCheer();
   saveAppUrl();
 }
@@ -840,6 +855,7 @@ function alertsCard(){
   return `<div class="card"><h2>Alerts on parents' phones</h2>
     <label class="sw" for="al-chores"><span>Chore completed<small>Each time Taliya checks off a chore</small></span><input type="checkbox" id="al-chores" ${a.chores?"checked":""}></label>
     <label class="sw" for="al-purch"><span>Purchases<small>Apple Pay taps and purchases she logs</small></span><input type="checkbox" id="al-purch" ${a.purchases?"checked":""}></label>
+    <label class="sw" for="al-money"><span>Money added or moved<small>Goes to the family channel: parents and Taliya</small></span><input type="checkbox" id="al-money" ${a.money!==false?"checked":""}></label>
     <div class="sw"><span>Preview the celebration<small>Plays it on this phone only. Nothing is saved or sent.</small></span></div>
     <div class="btns"><button type="button" class="btn ghost small" id="al-prev-kid">Taliya's version</button><button type="button" class="btn ghost small" id="al-prev-parent">Parents' version</button></div>
     <label class="sw" for="al-showsetup"><span>Show phone setup<small>Steps, alert topic and test buttons</small></span><input type="checkbox" id="al-showsetup" ${showSetup()?"checked":""}></label>
@@ -854,6 +870,9 @@ function alertsCard(){
     <div class="sub">Keep the topic private. Anyone who has it can see these alerts.</div>
     <div class="err" id="al-err" role="alert"></div>
     <div class="btns"><button type="button" class="btn ghost small" id="al-test">Send test alert</button><button type="button" class="btn ghost small" id="al-new">New topic</button></div>
+    ${a.family_topic ? `<div class="sub" style="font-weight:700;color:var(--ink);margin-top:8px">Also subscribe to the family channel</div>
+    <div class="sub">Money added or moved goes here, so Taliya sees it too. Parents subscribe to both topics; Taliya subscribes to this one only.</div>
+    <div class="topic"><code>${esc(a.family_topic)}</code><button type="button" data-copytopic="${esc(a.family_topic)}">Copy</button></div>` : ""}
     </div>
   </div>`;
 }
@@ -880,6 +899,11 @@ function bindAlerts(){
     catch(e){ err().textContent=errMsg(e); }
   };
   $("#al-chores").addEventListener("change", save); $("#al-purch").addEventListener("change", save);
+  $("#al-money").addEventListener("change", async e=>{
+    const on=e.target.checked;
+    try { await rpc("fm_money_alerts_save",{p_pw:state.pw,p_pin:state.pin,p_on:on}); state.alerts.money=on; toast(on?"Money alerts on":"Money alerts off"); }
+    catch(ex){ e.target.checked=!on; err().textContent=errMsg(ex); }
+  });
   $("#al-copy").addEventListener("click", ()=>{
     const t=state.alerts.topic||"";
     const ok=()=>toast("Topic copied");
@@ -896,6 +920,28 @@ function bindAlerts(){
     catch(e){ err().textContent=errMsg(e); }
   });
 }
+/* ---------- family alerts card (everyone) ---------- */
+const famStore = mkStore("taliya-money-show-family");
+async function openFamily(on){
+  $("#fam-show").checked = on; $("#fam-body").hidden = !on;
+  if (on) famStore.set("1"); else famStore.clear();
+  if (on && !state.familyTopic){
+    try { state.familyTopic = await rpc("fm_family_topic",{p_pw:state.pw}); $("#fam-topic").textContent = state.familyTopic || "Not set up yet"; }
+    catch(e){ $("#fam-err").textContent = errMsg(e); }
+  }
+}
+$("#fam-show").addEventListener("change", e=>openFamily(e.target.checked));
+$("#fam-copy").addEventListener("click", ()=>copyText(state.familyTopic||"", $("#fam-topic")));
+$("#fam-test").addEventListener("click", async ()=>{
+  $("#fam-err").textContent="";
+  try { await rpc("fm_family_test",{p_pw:state.pw}); toast("Test alert sent"); }
+  catch(e){ $("#fam-err").textContent=errMsg(e); }
+});
+function copyText(t, el){
+  const sel=()=>{ if(!el) return; const r=document.createRange(); r.selectNodeContents(el); const g=getSelection(); g.removeAllRanges(); g.addRange(r); toast("Selected. Tap Copy in the menu."); };
+  try { navigator.clipboard.writeText(t).then(()=>toast("Topic copied"), sel); } catch(e){ sel(); }
+}
+document.addEventListener("click", e=>{ const b=e.target.closest("[data-copytopic]"); if(b) copyText(b.dataset.copytopic, b.previousElementSibling); });
 function selectTopic(){ const el=$("#al-topic"); const r=document.createRange(); r.selectNodeContents(el); const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast("Topic selected. Tap Copy in the menu."); }
 
 const cheerStore = mkStore("taliya-money-cheer-seen");
@@ -1058,7 +1104,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-01.1";
+const APP_VERSION = "2026-11-01.2";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
