@@ -285,22 +285,6 @@ ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;f
     <div class="list" id="list"></div>
   </section>
 
-  <div class="card" id="famCard">
-    <h2>Money alerts on this phone</h2>
-    <div class="sub">Get an alert when a parent adds money or moves money between Taliya's accounts.</div>
-    <label class="sw" for="fam-show"><span>Show phone setup<small>Steps, alert topic and test button</small></span><input type="checkbox" id="fam-show"></label>
-    <div id="fam-body" style="display:flex;flex-direction:column;gap:10px" hidden>
-      <div class="sub" style="font-weight:700;color:var(--ink);margin-top:4px">Set up this iPhone once</div>
-      <ol class="steps">
-        <li>Install the free <b>ntfy</b> app from the App Store.</li>
-        <li>Open it, tap <b>+</b>, and paste this topic. Leave the server as ntfy.sh.</li>
-      </ol>
-      <div class="topic"><code id="fam-topic">Loading…</code><button type="button" id="fam-copy">Copy</button></div>
-      <ol class="steps" start="3"><li>Tap <b>Subscribe</b> and allow notifications.</li></ol>
-      <div class="err" id="fam-err" role="alert"></div>
-      <button type="button" class="btn ghost small" id="fam-test">Send a test alert</button>
-    </div>
-  </div>
   </div>
   <p class="hint" id="appVersion" style="font-size:12px;margin:0"></p>
 </div>
@@ -391,7 +375,6 @@ async function load(){
   state.bank = bk;
   state.ch = { chores:c.chores||[], checks:(c.checks||[]).map(k=>({...k,checked_at:Number(k.checked_at)})), settings:c.settings||state.ch.settings, payouts:c.payouts||[], today:c.today||today() };
   render(); renderChores();
-  if (famStore.get()==="1" && $("#fam-body").hidden) openFamily(true);
   maybeParentCheer();
   saveAppUrl();
 }
@@ -923,23 +906,6 @@ function bindAlerts(){
     catch(e){ err().textContent=errMsg(e); }
   });
 }
-/* ---------- family alerts card (everyone) ---------- */
-const famStore = mkStore("taliya-money-show-family");
-async function openFamily(on){
-  $("#fam-show").checked = on; $("#fam-body").hidden = !on;
-  if (on) famStore.set("1"); else famStore.clear();
-  if (on && !state.familyTopic){
-    try { state.familyTopic = await rpc("fm_family_topic",{p_pw:state.pw}); $("#fam-topic").textContent = state.familyTopic || "Not set up yet"; }
-    catch(e){ $("#fam-err").textContent = errMsg(e); }
-  }
-}
-$("#fam-show").addEventListener("change", e=>openFamily(e.target.checked));
-$("#fam-copy").addEventListener("click", ()=>copyText(state.familyTopic||"", $("#fam-topic")));
-$("#fam-test").addEventListener("click", async ()=>{
-  $("#fam-err").textContent="";
-  try { await rpc("fm_family_test",{p_pw:state.pw}); toast("Test alert sent"); }
-  catch(e){ $("#fam-err").textContent=errMsg(e); }
-});
 function copyText(t, el){
   const sel=()=>{ if(!el) return; const r=document.createRange(); r.selectNodeContents(el); const g=getSelection(); g.removeAllRanges(); g.addRange(r); toast("Selected. Tap Copy in the menu."); };
   try { navigator.clipboard.writeText(t).then(()=>toast("Topic copied"), sel); } catch(e){ sel(); }
@@ -1107,7 +1073,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-01.3";
+const APP_VERSION = "2026-11-01.4";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
