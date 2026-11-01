@@ -206,6 +206,20 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:70
 .topic button{border:0;background:var(--accent);color:var(--accent-ink);border-radius:9px;padding:8px 12px;font-weight:700;font-size:13px}
 ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
 .btn.small{padding:11px;font-size:15px}
+/* optional chores */
+.xrow{display:flex;flex-direction:column;gap:8px;padding:14px 16px;border-top:1px solid var(--line)}
+.xrow:first-of-type{border-top:0}
+.xtop{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.xtop b{font-weight:700;display:block;overflow-wrap:anywhere}
+.xmeta{font-size:13px;color:var(--muted)}
+.xamt{font-family:var(--f-display);font-weight:600;font-size:20px;white-space:nowrap}
+.xpill{font-size:12px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap;align-self:flex-start;border:1px solid var(--line);color:var(--muted);background:var(--bg)}
+.xpill.go{color:var(--save);border-color:var(--save);background:var(--save-soft)}
+.xpill.wait{color:var(--accent);border-color:var(--accent)}
+.xrow.muted b,.xrow.muted .xamt{color:var(--muted)}
+.xbtns{display:flex;gap:8px;flex-wrap:wrap}
+.xbtns .btn{flex:1;min-width:120px;padding:11px;font-size:15px}
+.tabdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--spend);margin-left:6px;vertical-align:middle}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:600;font-size:14px;z-index:60}
 /* all-chores-done celebration */
 .cheer{position:fixed;inset:0;z-index:70;overflow:hidden;pointer-events:auto;display:grid;place-items:center;
@@ -260,6 +274,7 @@ ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;f
     <div class="card" id="wkSummary"></div>
     <div class="days" id="days" role="group" aria-label="Day of week"></div>
     <div class="list" id="choreList"></div>
+    <div class="card" id="extraCard" style="padding:0;gap:0" hidden></div>
     <div id="parentTools"></div>
   </div>
 
@@ -358,7 +373,9 @@ const ERR = {
   no_chores:"There are no chores scheduled this week, so there's nothing to pay.",
   bad_split:"The split has to add up to 100%.",
   future_week:"You can't pay a week that hasn't started.",
-  bad_days:"Pick at least one day.", bad_name:"Give the chore a name."
+  bad_days:"Pick at least one day.", bad_name:"Give the chore a name.",
+  bad_due:"Pick a due date of today or later.", not_open:"That optional chore has already changed. Pull down to refresh.",
+  past_due:"The due date for that optional chore has passed."
 };
 function errMsg(e){
   if (typeof e==="string") return e;
@@ -368,14 +385,17 @@ function weekStart(ds){ const [Y,M,D]=ds.split("-").map(Number); const d=new Dat
 function addDays(ds,n){ const [Y,M,D]=ds.split("-").map(Number); const d=new Date(Y,M-1,D+n); return ymd(d); }
 async function load(){
   const from = addDays(weekStart(today()), -7*9);
-  const [r, c, bk] = await Promise.all([ rpc("fm_load", {p_pw: state.pw}), rpc("fm_load_chores", {p_pw: state.pw, p_from: from}),
-    rpc("fm_bank_public", {p_pw: state.pw}).catch(()=>null) ]);
+  const [r, c, bk, ex] = await Promise.all([ rpc("fm_load", {p_pw: state.pw}), rpc("fm_load_chores", {p_pw: state.pw, p_from: from}),
+    rpc("fm_bank_public", {p_pw: state.pw}).catch(()=>null),
+    rpc("fm_extra_list", {p_pw: state.pw}).catch(()=>null) ]);
   state.tx = (r.tx||[]).map(t => ({...t, created_at:Number(t.created_at)}));
   state.goal = r.goal;
   state.bank = bk;
+  if (ex) state.extra = ex;
   state.ch = { chores:c.chores||[], checks:(c.checks||[]).map(k=>({...k,checked_at:Number(k.checked_at)})), settings:c.settings||state.ch.settings, payouts:c.payouts||[], today:c.today||today() };
-  render(); renderChores();
+  render(); renderChores(); renderExtra();
   maybeParentCheer();
+  maybeOfferPrompt();
   saveAppUrl();
 }
 
@@ -724,14 +744,14 @@ function requireParent(then){
         const ok = await rpc("fm_parent_ok",{p_pw:state.pw,p_pin:pin});
         if (!ok) throw {code:"wrong_pin"};
         state.pin=pin; if (fd.get("remember")) pinStore.set(pin);
-        renderParentBtn(); closeSheet(); render(); renderChores(); toast("Parent mode on"); maybeParentCheer();
+        renderParentBtn(); closeSheet(); render(); renderChores(); renderExtra(); toast("Parent mode on"); maybeParentCheer();
         then && then();
       } catch(ex){ err.textContent=errMsg(ex); btn.disabled=false; btn.textContent="Unlock"; }
     });
   });
 }
 $("#btnParent").addEventListener("click", ()=>{
-  if (state.pin){ state.pin=null; state.alerts=null; pinStore.clear(); renderParentBtn(); render(); renderChores(); toast("Parent mode off"); }
+  if (state.pin){ state.pin=null; state.alerts=null; pinStore.clear(); renderParentBtn(); render(); renderChores(); renderExtra(); toast("Parent mode off"); }
   else requireParent();
 });
 
@@ -1029,10 +1049,132 @@ function sheetAllowance(){
     });
   });
 }
+/* ---------- optional chores ---------- */
+state.extra = [];
+const XSTATUS = {
+  offered:["New","wait"], accepted:["Accepted","wait"], done:["Done · waiting for approval","go"], paid:["Paid ✓","go"],
+  declined:["Declined",""], missed:["Missed",""], expired:["Expired",""], removed:["Removed",""]
+};
+function dueLabel(ds){
+  const td = state.ch.today || today();
+  if (ds===td) return "due today";
+  if (ds===addDays(td,1)) return "due tomorrow";
+  const [Y,M,D]=ds.split("-").map(Number);
+  return "due " + new Date(Y,M-1,D).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+}
+function renderExtra(){
+  const el=$("#extraCard"); if(!el) return;
+  const list=(state.extra||[]).filter(x=>x.status!=="removed");
+  const kidPending = !state.pin && list.some(x=>x.status==="offered");
+  $("#tabChores").innerHTML = "Chores" + (kidPending ? '<span class="tabdot" aria-label="New optional chore"></span>' : "");
+  if (!list.length && !state.pin){ el.hidden=true; el.innerHTML=""; return; }
+  el.hidden=false;
+  const rows = list.map(x=>{
+    const [label,cls]=XSTATUS[x.status]||[x.status,""];
+    const muted = ["declined","missed","expired"].includes(x.status);
+    let acts="";
+    if (!state.pin){
+      if (x.status==="offered") acts=`<div class="xbtns"><button type="button" class="btn primary" data-xact="accept" data-xid="${x.id}">Accept</button><button type="button" class="btn ghost" data-xact="decline" data-xid="${x.id}">Decline</button></div>`;
+      if (x.status==="accepted") acts=`<div class="xbtns"><button type="button" class="btn primary" data-xact="done" data-xid="${x.id}">I finished it</button></div>`;
+    } else {
+      if (x.status==="done") acts=`<div class="xbtns"><button type="button" class="btn primary" data-xact="pay" data-xid="${x.id}">Approve &amp; pay ${fmt(x.amount)}</button><button type="button" class="btn ghost" data-xact="back" data-xid="${x.id}">Send back</button></div>`;
+      else if (x.status==="missed") acts=`<div class="xbtns"><button type="button" class="btn ghost" data-xact="pay" data-xid="${x.id}">Pay anyway ${fmt(x.amount)}</button></div>`;
+      else if (x.status==="offered"||x.status==="accepted") acts=`<div class="xbtns"><button type="button" class="btn ghost" data-xact="remove" data-xid="${x.id}">Remove</button></div>`;
+    }
+    return `<div class="xrow ${muted?"muted":""}">
+      <div class="xtop"><div><b>${esc(x.name)}</b><span class="xmeta">${esc(((x.status==="paid"||muted) && x.due < (state.ch.today||today())) ? "was "+dueLabel(x.due) : dueLabel(x.due))}${x.note?" · "+esc(x.note):""}</span></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px"><span class="xamt num">${fmt(x.amount)}</span><span class="xpill ${cls}">${label}</span></div></div>
+      ${acts}</div>`;
+  }).join("");
+  el.innerHTML = `<div class="goal-row" style="padding:16px 16px 8px"><h2>Optional chores</h2>${state.pin?'<button type="button" class="link" id="btnNewExtra">Add optional chore</button>':""}</div>
+    ${rows || `<div class="xrow"><span class="xmeta">No optional chores right now. Add one and Taliya gets an alert to accept or decline it.</span></div>`}
+    <div class="err" id="xerr" role="alert" style="padding:0 16px 12px"></div>`;
+  $("#btnNewExtra")?.addEventListener("click", sheetExtra);
+}
+async function extraAction(act, id, btn){
+  const x=(state.extra||[]).find(e=>e.id===id); if(!x) return;
+  const fn = {accept:"fm_extra_respond", decline:"fm_extra_respond", done:"fm_extra_done", pay:"fm_extra_pay", back:"fm_extra_send_back", remove:"fm_extra_remove"}[act];
+  const args = {p_pw:state.pw, p_id:id};
+  if (act==="accept"||act==="decline") args.p_accept = act==="accept";
+  if (["pay","back","remove"].includes(act)){
+    if (!state.pin){ requireParent(()=>extraAction(act,id)); return; }
+    args.p_pin = state.pin;
+    if (btn && !btn.dataset.armed && act!=="back"){ btn.dataset.armed="1"; btn.textContent = act==="remove" ? "Tap again to remove" : "Tap again to pay " + fmt(x.amount); return; }
+  }
+  if (btn) btn.disabled = true;
+  try {
+    await rpc(fn, args);
+    toast({accept:"Accepted. Parents were notified.", decline:"Declined", done:"Nice! Parents will approve it.", pay:"Paid "+fmt(x.amount)+" into Spending", back:"Sent back to Taliya", remove:"Removed"}[act]);
+    await load();
+  } catch(e){ const xe=$("#xerr"); if (xe) xe.textContent=errMsg(e); else toast(errMsg(e)); if(btn) btn.disabled=false; await load().catch(()=>{}); }
+}
+document.addEventListener("click", e=>{
+  const b=e.target.closest("[data-xact]"); if(!b || b.disabled) return;
+  if (b.closest("#sheet")) return;     // the prompt handles its own buttons
+  extraAction(b.dataset.xact, b.dataset.xid, b);
+});
+function sheetExtra(){
+  if (!state.pin){ requireParent(sheetExtra); return; }
+  const td = state.ch.today || today();
+  openSheet(`<h3>Add optional chore</h3><form>
+    <label class="f">Chore<input id="x-name" name="name" maxlength="60" placeholder="Wash the car, clean the garage…" required></label>
+    <div class="two">
+      <label class="f">Pays<input class="num" id="x-amt" name="amt" inputmode="decimal" placeholder="$0.00" required></label>
+      <label class="f">Due by<input type="date" id="x-due" name="due" min="${td}" value="${addDays(td,3)}" required></label>
+    </div>
+    <label class="f">Details (optional)<input id="x-note" name="note" maxlength="120" placeholder="Inside and out, vacuum the seats"></label>
+    <p class="sub" style="margin:0">Taliya gets an alert to accept or decline it. When she's done, you approve it and the money goes into her Spending.</p>
+    ${footer("Offer it")}</form>`, el=>{
+    setTimeout(()=>el.querySelector("#x-name")?.focus(),60);
+    el.querySelector("[data-close]").addEventListener("click", closeSheet);
+    el.querySelector("form").addEventListener("submit", async ev=>{
+      ev.preventDefault();
+      const fd=new FormData(ev.target), err=el.querySelector("#err"), btn=el.querySelector("#submitBtn");
+      const amt=toCents(fd.get("amt")), name=fd.get("name").trim(), due=fd.get("due");
+      if(!name) return err.textContent="Give the chore a name.";
+      if(!(amt>0)) return err.textContent="Enter how much it pays.";
+      if(!due || due<td) return err.textContent=ERR.bad_due;
+      btn.disabled=true; btn.textContent="Sending…";
+      try { await rpc("fm_extra_add",{p_pw:state.pw,p_pin:state.pin,p_name:name,p_amount:amt,p_due:due,p_note:fd.get("note").trim()});
+        closeSheet(); toast("Offered. Taliya was notified."); await load(); }
+      catch(ex){ err.textContent=errMsg(ex); btn.disabled=false; btn.textContent="Offer it"; }
+    });
+  });
+}
+// Taliya's phone: ask about new optional chores when the app opens
+function maybeOfferPrompt(){
+  if (state.pin || $("#app").hidden || !$("#scrim").hidden) return;
+  const offers=(state.extra||[]).filter(x=>x.status==="offered");
+  if (!offers.length) return;
+  let seen=[]; try { seen=JSON.parse(sessionStorage.getItem("taliya-money-offers-seen")||"[]"); } catch(e){}
+  if (offers.every(x=>seen.includes(x.id))) return;
+  try { sessionStorage.setItem("taliya-money-offers-seen", JSON.stringify(offers.map(x=>x.id))); } catch(e){}
+  const card = x => `<div class="xrow" data-offer="${x.id}" style="border:1px solid var(--line);border-radius:14px;margin-bottom:10px">
+      <div class="xtop"><div><b>${esc(x.name)}</b><span class="xmeta">${esc(dueLabel(x.due))}${x.note?" · "+esc(x.note):""}</span></div><span class="xamt num">${fmt(x.amount)}</span></div>
+      <div class="xbtns"><button type="button" class="btn primary" data-xact="accept" data-xid="${x.id}">Accept</button><button type="button" class="btn ghost" data-xact="decline" data-xid="${x.id}">Decline</button></div>
+      <div class="err" role="alert"></div></div>`;
+  openSheet(`<h3>${offers.length>1?"New optional chores":"New optional chore"}</h3>
+    <p class="sub" style="margin:0 0 12px">Want to earn extra? Accept it if you can finish by the due date. The money goes into your Spending once a parent approves it.</p>
+    <div id="offerList">${offers.map(card).join("")}</div>
+    <div class="btns"><button type="button" class="btn ghost" data-close>Decide later</button></div>`, el=>{
+    el.querySelector("[data-close]").addEventListener("click", ()=>{ closeSheet(); setTab("chores"); });
+    el.querySelectorAll("[data-xact]").forEach(b=>b.addEventListener("click", async ()=>{
+      const row=b.closest("[data-offer]"), accept=b.dataset.xact==="accept";
+      row.querySelectorAll("button").forEach(x=>x.disabled=true);
+      try {
+        await rpc("fm_extra_respond",{p_pw:state.pw,p_id:b.dataset.xid,p_accept:accept});
+        row.innerHTML = `<div class="xtop"><b>${esc(row.querySelector("b").textContent)}</b><span class="xpill ${accept?"go":""}">${accept?"Accepted":"Declined"}</span></div>`;
+        row.dataset.done="1";
+        if ([...el.querySelectorAll("[data-offer]")].every(r=>r.dataset.done)){ setTimeout(()=>{ closeSheet(); load().catch(()=>{}); toast(accept?"Accepted. Parents were notified.":"Got it"); }, 900); }
+      } catch(e){ row.querySelector(".err").textContent=errMsg(e); row.querySelectorAll("button").forEach(x=>x.disabled=false); }
+    }));
+  });
+}
+
 function setTab(t){
   state.tab=t; $("#tabMoney").setAttribute("aria-selected", t==="money"); $("#tabChores").setAttribute("aria-selected", t==="chores");
   $("#moneyView").hidden = t!=="money"; $("#choresView").hidden = t!=="chores";
-  if (t==="chores") renderChores();
+  if (t==="chores"){ renderChores(); renderExtra(); }
 }
 $("#tabMoney").addEventListener("click", ()=>setTab("money"));
 $("#tabChores").addEventListener("click", ()=>setTab("chores"));
@@ -1073,7 +1215,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-01.4";
+const APP_VERSION = "2026-11-01.5";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
