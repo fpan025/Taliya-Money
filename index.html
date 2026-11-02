@@ -520,6 +520,8 @@ async function connectBank(update){
 }
 
 /* ---------- investments (E*TRADE) ---------- */
+const investStore = mkStore("taliya-money-show-invest");
+function investDetails(){ return investStore.get()==="1"; }
 function renderInvest(){
   const el=$("#investCard"), v=state.invest;
   if (!v || (!v.connected && !state.pin) || (!v.ready && !v.linked)){ el.hidden=true; el.innerHTML=""; return; }
@@ -543,16 +545,21 @@ function renderInvest(){
         <span>${esc(h.ticker && h.name!==h.ticker ? h.name : "")}${shares? (h.ticker&&h.name!==h.ticker?" · ":"")+shares:""}</span>
         <span class="gain num ${g==null?"":g>=0?"up":"down"}">${g==null?"":(g>=0?"+":"−")+fmt(Math.abs(g))+" total"}</span></div>`;
     }).join("");
+    const det = investDetails();
     el.innerHTML = `<div class="goal-row"><h2>Investments</h2>${v.problem?'<span class="tag" style="color:var(--danger)">Needs attention</span>':'<span class="sep-note">Not in totals</span>'}</div>
       <div class="sub">${esc(v.institution||"E*TRADE")} · ${esc(v.account||"Taliya's account")}</div>
       <div class="inv-bal num">${v.balance!=null?fmt(v.balance):"—"}</div>
-      <div class="sub">Updated ${esc(when)} · refreshes a few times a day</div>
+      <div class="sub">Updated ${esc(when)}</div>
+      <label class="sw" for="iv-show"><span>Show details<small>Positions, cash and buttons</small></span><input type="checkbox" id="iv-show" ${det?"checked":""}></label>
+      <div id="iv-details" style="display:flex;flex-direction:column;gap:10px" ${det?"":"hidden"}>
       ${hs?`<div>${hs}</div>`:`<div class="sub">${v.balance==null?"Holdings will appear after the first update.":"No holdings reported."}</div>`}
       ${v.problem && state.pin ? `<div class="err" id="iv-problem">Loading details…</div>` : ""}
       <div class="err" id="iv-err" role="alert"></div>
       <div class="btns"><button type="button" class="btn ghost small" id="iv-sync">Check now</button>
       ${state.pin?`<button type="button" class="btn ghost small" id="iv-manage">${v.problem?"Reconnect":"Add or change accounts"}</button>`:""}</div>
-      ${state.pin?'<div class="btns"><button type="button" class="btn ghost small" id="iv-choose">Change which account</button><button type="button" class="btn danger small" id="iv-off">Disconnect</button></div>':""}`;
+      ${state.pin?'<div class="btns"><button type="button" class="btn ghost small" id="iv-choose">Change which account</button><button type="button" class="btn danger small" id="iv-off">Disconnect</button></div>':""}
+      </div>`;
+    $("#iv-show").addEventListener("change", e=>{ if (e.target.checked) investStore.set("1"); else investStore.clear(); $("#iv-details").hidden = !e.target.checked; });
     if (v.problem && state.pin) rpc("fm_invest_status",{p_pw:state.pw,p_pin:state.pin}).then(st=>{ const p=$("#iv-problem"); if(p) p.textContent=st.error||"The last update didn't finish. Tap Check now."; }).catch(()=>{});
   }
   const ivErr = m => { const x=$("#iv-err"); if(x) x.textContent=m; else toast(m); };
@@ -1319,7 +1326,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-01.6";
+const APP_VERSION = "2026-11-01.7";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
