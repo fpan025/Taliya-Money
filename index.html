@@ -423,6 +423,7 @@ function balances(){
   return b;
 }
 /* ---------- card connection (Plaid) ---------- */
+const bankStore = mkStore("taliya-money-show-bank");
 function renderBank(){
   const el=$("#bankCard"), bk=state.bank;
   if (!bk || (!bk.connected && !state.pin) || (!bk.ready && !bk.connected)){ el.hidden=true; el.innerHTML=""; return; }
@@ -435,12 +436,19 @@ function renderBank(){
       <button type="button" class="btn primary" id="bk-connect">Connect Taliya's card</button>`;
   } else {
     const when = bk.last_sync ? new Date(Number(bk.last_sync)).toLocaleString("en-US",{weekday:"short",hour:"numeric",minute:"2-digit"}) : "not yet";
+    const det = bankStore.get()==="1";
     el.innerHTML = `<div class="goal-row"><h2>${esc(bk.institution||"Card")} connected</h2>${bk.problem?'<span class="tag" style="color:var(--danger)">Needs attention</span>':""}</div>
-      <div class="sub">${esc(bk.account||"Taliya's account")} · last checked ${esc(when)} · checks every 30 minutes</div>
+      <div class="sub">${esc(bk.account||"Taliya's account")}</div>
+      <div class="sub">Last checked ${esc(when)}</div>
+      <label class="sw" for="bk-show"><span>Show details<small>Connection details and buttons</small></span><input type="checkbox" id="bk-show" ${det?"checked":""}></label>
+      <div id="bk-details" style="display:flex;flex-direction:column;gap:10px" ${det?"":"hidden"}>
+      <div class="sub">Checks for new purchases every 30 minutes.</div>
       ${bk.problem && state.pin ? `<div class="err" id="bk-problem">Loading details…</div>` : bk.problem ? `<div class="sub">Ask a parent to check the card connection.</div>` : ""}
       <div class="err" id="bk-err" role="alert"></div>
       <div class="btns"><button type="button" class="btn ghost small" id="bk-sync">Check now</button>
-      ${state.pin?'<button type="button" class="btn ghost small" id="bk-connect">Reconnect</button><button type="button" class="btn danger small" id="bk-off">Disconnect</button>':""}</div>`;
+      ${state.pin?'<button type="button" class="btn ghost small" id="bk-connect">Reconnect</button><button type="button" class="btn danger small" id="bk-off">Disconnect</button>':""}</div>
+      </div>`;
+    $("#bk-show").addEventListener("change", e=>{ if (e.target.checked) bankStore.set("1"); else bankStore.clear(); $("#bk-details").hidden = !e.target.checked; });
   }
   $("#bk-connect")?.addEventListener("click", ()=>connectBank(!!bk.connected));
   $("#bk-sync")?.addEventListener("click", async ()=>{
@@ -1326,7 +1334,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-01.7";
+const APP_VERSION = "2026-11-01.8";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
