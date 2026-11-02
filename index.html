@@ -220,6 +220,16 @@ ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;f
 .xbtns{display:flex;gap:8px;flex-wrap:wrap}
 .xbtns .btn{flex:1;min-width:120px;padding:11px;font-size:15px}
 .tabdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--spend);margin-left:6px;vertical-align:middle}
+/* investments */
+.inv-bal{font-family:var(--f-display);font-weight:600;font-size:34px;line-height:1}
+.hold{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:10px 0;border-top:1px solid var(--line)}
+.hold:first-child{border-top:0}
+.hold b{font-weight:700;overflow-wrap:anywhere}
+.hold span{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.hold .v{font-weight:700;text-align:right}
+.hold .gain{font-size:12px;text-align:right}
+.gain.up{color:var(--save)} .gain.down{color:var(--danger)}
+.sep-note{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:600;font-size:14px;z-index:60}
 /* all-chores-done celebration */
 .cheer{position:fixed;inset:0;z-index:70;overflow:hidden;pointer-events:auto;display:grid;place-items:center;
@@ -280,6 +290,7 @@ ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;f
 
   <div class="view" id="moneyView">
   <div class="accounts" id="accounts" role="group" aria-label="Accounts"></div>
+  <div class="card" id="investCard" hidden></div>
 
   <div class="actions">
     <button class="act" id="btnAdd" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add money</button>
@@ -385,13 +396,15 @@ function weekStart(ds){ const [Y,M,D]=ds.split("-").map(Number); const d=new Dat
 function addDays(ds,n){ const [Y,M,D]=ds.split("-").map(Number); const d=new Date(Y,M-1,D+n); return ymd(d); }
 async function load(){
   const from = addDays(weekStart(today()), -7*9);
-  const [r, c, bk, ex] = await Promise.all([ rpc("fm_load", {p_pw: state.pw}), rpc("fm_load_chores", {p_pw: state.pw, p_from: from}),
+  const [r, c, bk, ex, inv] = await Promise.all([ rpc("fm_load", {p_pw: state.pw}), rpc("fm_load_chores", {p_pw: state.pw, p_from: from}),
     rpc("fm_bank_public", {p_pw: state.pw}).catch(()=>null),
-    rpc("fm_extra_list", {p_pw: state.pw}).catch(()=>null) ]);
+    rpc("fm_extra_list", {p_pw: state.pw}).catch(()=>null),
+    rpc("fm_invest_public", {p_pw: state.pw}).catch(()=>null) ]);
   state.tx = (r.tx||[]).map(t => ({...t, created_at:Number(t.created_at)}));
   state.goal = r.goal;
   state.bank = bk;
   if (ex) state.extra = ex;
+  state.invest = inv;
   state.ch = { chores:c.chores||[], checks:(c.checks||[]).map(k=>({...k,checked_at:Number(k.checked_at)})), settings:c.settings||state.ch.settings, payouts:c.payouts||[], today:c.today||today() };
   render(); renderChores(); renderExtra();
   maybeParentCheer();
@@ -463,11 +476,11 @@ async function bankFn(body){
   if (!data.ok) throw (data.error || "The bank connection didn't work. Try again.");
   return data;
 }
-function pickAccount(accounts){
+function pickAccount(accounts, subtitle){
   if (accounts.length <= 1) return Promise.resolve(accounts[0] || null);
   return new Promise(resolve=>{
     openSheet(`<h3>Which account is Taliya's?</h3>
-      <p class="sub" style="margin:0 0 12px">Only purchases from this account will be logged.</p>
+      <p class="sub" style="margin:0 0 12px">${esc(subtitle || "Only purchases from this account will be logged.")}</p>
       <div class="list">${accounts.map((a,i)=>`<button type="button" class="crow" data-acc="${i}"><span><span class="cname">${esc(a.name||"Account")}</span><span class="cwhen">${esc([a.subtype,a.mask?"ending "+a.mask:""].filter(Boolean).join(" · "))}</span></span></button>`).join("")}</div>
       <div class="btns" style="margin-top:14px"><button type="button" class="btn ghost" data-close>Cancel</button></div>`, el=>{
       el.querySelector("[data-close]").addEventListener("click", ()=>{ closeSheet(); resolve(null); });
@@ -506,7 +519,98 @@ async function connectBank(update){
   } catch(e){ show(errMsg(e)); }
 }
 
+/* ---------- investments (E*TRADE) ---------- */
+function renderInvest(){
+  const el=$("#investCard"), v=state.invest;
+  if (!v || (!v.connected && !state.pin) || (!v.ready && !v.linked)){ el.hidden=true; el.innerHTML=""; return; }
+  el.hidden=false;
+  if (!v.linked){
+    el.innerHTML = `<h2>Investments</h2>
+      <div class="sub">Connect E*TRADE to show Taliya's brokerage balance and what she owns. It's shown on its own and isn't added to the totals above.</div>
+      <div class="sub">Tip: do this in Safari or on a computer.</div>
+      <div class="err" id="iv-err" role="alert"></div>
+      <button type="button" class="btn primary" id="iv-connect">Connect E*TRADE</button>`;
+  } else if (!v.connected){
+    el.innerHTML = `<h2>Investments</h2><div class="sub">E*TRADE is connected. Choose which account is Taliya's.</div>
+      <div class="err" id="iv-err" role="alert"></div>
+      <button type="button" class="btn primary" id="iv-choose">Choose Taliya's account</button>`;
+  } else {
+    const when = v.as_of ? new Date(Number(v.as_of)).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "waiting for first update";
+    const hs = (v.holdings||[]).map(h=>{
+      const g = h.cost_basis!=null && h.value!=null ? h.value - h.cost_basis : null;
+      const shares = h.name==="Cash" ? "" : (h.quantity!=null ? (+h.quantity).toLocaleString("en-US",{maximumFractionDigits:4})+" shares" : "");
+      return `<div class="hold"><b>${esc(h.ticker||h.name)}</b><span class="v num">${fmt(h.value||0)}</span>
+        <span>${esc(h.ticker && h.name!==h.ticker ? h.name : "")}${shares? (h.ticker&&h.name!==h.ticker?" · ":"")+shares:""}</span>
+        <span class="gain num ${g==null?"":g>=0?"up":"down"}">${g==null?"":(g>=0?"+":"−")+fmt(Math.abs(g))+" total"}</span></div>`;
+    }).join("");
+    el.innerHTML = `<div class="goal-row"><h2>Investments</h2>${v.problem?'<span class="tag" style="color:var(--danger)">Needs attention</span>':'<span class="sep-note">Not in totals</span>'}</div>
+      <div class="sub">${esc(v.institution||"E*TRADE")} · ${esc(v.account||"Taliya's account")}</div>
+      <div class="inv-bal num">${v.balance!=null?fmt(v.balance):"—"}</div>
+      <div class="sub">Updated ${esc(when)} · refreshes a few times a day</div>
+      ${hs?`<div>${hs}</div>`:`<div class="sub">${v.balance==null?"Holdings will appear after the first update.":"No holdings reported."}</div>`}
+      ${v.problem && state.pin ? `<div class="err" id="iv-problem">Loading details…</div>` : ""}
+      <div class="err" id="iv-err" role="alert"></div>
+      <div class="btns"><button type="button" class="btn ghost small" id="iv-sync">Check now</button>
+      ${state.pin?`<button type="button" class="btn ghost small" id="iv-manage">${v.problem?"Reconnect":"Add or change accounts"}</button>`:""}</div>
+      ${state.pin?'<div class="btns"><button type="button" class="btn ghost small" id="iv-choose">Change which account</button><button type="button" class="btn danger small" id="iv-off">Disconnect</button></div>':""}`;
+    if (v.problem && state.pin) rpc("fm_invest_status",{p_pw:state.pw,p_pin:state.pin}).then(st=>{ const p=$("#iv-problem"); if(p) p.textContent=st.error||"The last update didn't finish. Tap Check now."; }).catch(()=>{});
+  }
+  const ivErr = m => { const x=$("#iv-err"); if(x) x.textContent=m; else toast(m); };
+  $("#iv-connect")?.addEventListener("click", ()=>connectInvest(false));
+  $("#iv-manage")?.addEventListener("click", ()=>connectInvest(true));
+  $("#iv-choose")?.addEventListener("click", chooseInvestAccount);
+  $("#iv-sync")?.addEventListener("click", async ()=>{
+    try { const ok = await rpc("fm_invest_sync_now",{p_pw:state.pw}); toast(ok?"Checking E*TRADE…":"Checked a moment ago"); if(ok) setTimeout(()=>load().catch(()=>{}), 9000); }
+    catch(e){ ivErr(errMsg(e)); }
+  });
+  const off=$("#iv-off"); let armed=false;
+  off && off.addEventListener("click", async ()=>{
+    if(!armed){ armed=true; off.textContent="Tap again"; return; }
+    try { await rpc("fm_invest_disconnect",{p_pw:state.pw,p_pin:state.pin}); toast("E*TRADE disconnected"); await load(); } catch(e){ ivErr(errMsg(e)); }
+  });
+}
+async function chooseInvestAccount(){
+  if (!state.pin){ requireParent(chooseInvestAccount); return; }
+  try {
+    const st = await rpc("fm_invest_status",{p_pw:state.pw,p_pin:state.pin});
+    const list = (st.accounts||[]).filter(a=>a.type==="investment" || a.type==="brokerage" || !a.type);
+    const acct = await pickAccount(list.length?list:(st.accounts||[]), "Only this account's balance and holdings are shown in Taliya's app.");
+    if (!acct) return;
+    await rpc("fm_invest_choose",{p_pw:state.pw,p_pin:state.pin,p_account_id:acct.id});
+    toast("Saved. Getting the balance…"); await load(); setTimeout(()=>load().catch(()=>{}), 9000);
+  } catch(e){ toast(errMsg(e)); }
+}
+async function connectInvest(update){
+  if (!state.pin){ requireParent(()=>connectInvest(update)); return; }
+  const show = m => { const x=$("#iv-err"); if (x) x.textContent=m; else toast(m); };
+  try {
+    const [{link_token}] = await Promise.all([ bankFn({action:"invest_link_token", update}),
+      loadPlaidScript().catch(()=>{ throw "Couldn't load the secure sign-in. Check your connection and try again."; }) ]);
+    window.Plaid.create({
+      token: link_token,
+      onSuccess: async (public_token, md)=>{
+        try {
+          const picked = ((md && md.accounts) || []).filter(a=>a.type==="investment" || a.type==="brokerage" || !a.type);
+          if (update){
+            const r = await bankFn({action:"invest_reconnected"});
+            toast("E*TRADE accounts updated"); await load();
+            if (state.invest && !state.invest.connected) chooseInvestAccount();
+            return;
+          }
+          let acct = picked.length===1 ? picked[0] : await pickAccount(picked.length?picked:(md.accounts||[]), "Only this account's balance and holdings are shown in Taliya's app. Your other accounts stay connected for later.");
+          toast("Connecting…");
+          await bankFn({action:"invest_exchange", public_token, account_id: acct ? acct.id : null,
+            institution:(md && md.institution && md.institution.name) || "E*TRADE"});
+          toast("E*TRADE connected"); await load(); setTimeout(()=>load().catch(()=>{}), 12000);
+        } catch(e){ show(errMsg(e)); await load().catch(()=>{}); }
+      },
+      onExit: (e)=>{ if (e && (e.display_message || e.error_message)) show(e.display_message || e.error_message); }
+    }).open();
+  } catch(e){ show(errMsg(e)); }
+}
+
 function render(){
+  renderInvest();
   renderBank();
   const b=balances(), total=b.spending+b.savings+b.gift, tf=fmt(total), dot=tf.lastIndexOf(".");
   $("#total").innerHTML = esc(tf.slice(0,dot))+"<small>"+esc(tf.slice(dot))+"</small>";
@@ -1215,7 +1319,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-01.5";
+const APP_VERSION = "2026-11-01.6";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
