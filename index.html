@@ -293,7 +293,7 @@ ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;f
   <div class="card" id="investCard" hidden></div>
 
   <div class="actions">
-    <button class="act" id="btnAdd" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add money</button>
+    <button class="act" id="btnAdd" type="button"><svg viewBox="0 0 24 24"><path d="M12 4v7M8.5 7.5h7M5 15h14"/></svg>Add or remove money</button>
     <button class="act" id="btnReimb" type="button"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>Request reimbursement</button>
     <button class="act" id="btnMove" type="button"><svg viewBox="0 0 24 24"><path d="M4 8h14l-4-4M20 16H6l4 4"/></svg>Move money</button>
   </div>
@@ -391,7 +391,8 @@ const ERR = {
   past_due:"The due date for that optional chore has passed.",
   bad_reason:"Add a reason for the reimbursement.", bad_amount:"Enter an amount between $0.01 and $1,000.",
   too_many:"There are already 10 requests waiting. Wait for a parent to answer some first.",
-  reimb_closed:"That request was already answered. Pull down to refresh."
+  reimb_closed:"That request was already answered. Pull down to refresh.",
+  not_enough:"There isn't that much in that account."
 };
 function errMsg(e){
   if (typeof e==="string") return e;
@@ -677,7 +678,7 @@ function render(){
     if (t.type==="deposit"){ title=t.note||"Money added"; sub=`Into ${acctName(t.account)}`+(t.from_who?` · from ${t.from_who}`:""); sign="+"; }
     else if (t.type==="purchase"){ title=t.store||"Purchase"; sub=acctName(t.account)+(t.note?` · ${t.note}`:""); sign="−"; }
     else { title=`${acctName(t.account)} → ${acctName(t.to_account)}`; sub=t.note||"Moved money"; tone=t.to_account; if(f===t.account)sign="−"; else if(f===t.to_account)sign="+"; }
-    const tags = (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.source==="bank"||t.source==="alert"?'<span class="tag pay">Card</span>':"")+(t.source==="reimb"?'<span class="tag">Reimbursement</span>':"")
+    const tags = (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.source==="bank"||t.source==="alert"?'<span class="tag pay">Card</span>':"")+(t.source==="reimb"?'<span class="tag">Reimbursement</span>':"")+(t.source==="payback"?'<span class="tag">Taken out</span>':"")
       +(t.bank_status==="pending"?'<span class="tag">Pending</span>':"")+(t.has_receipt?'<span class="tag">Receipt</span>':"");
     html+=`<button type="button" class="row t-${tone}" data-detail="${esc(t.id)}">
       <span class="ico">${ICON[t.type]}</span>
@@ -715,7 +716,7 @@ function bindForm(el, build, done){
     e.preventDefault();
     const err=el.querySelector("#err"), btn=el.querySelector("#submitBtn"), label=btn.textContent;
     err.textContent=""; btn.disabled=true; btn.textContent="Saving…";
-    try { await build(new FormData(e.target)); closeSheet(); toast(done); await load(); }
+    try { await build(new FormData(e.target)); const msg = typeof done==="function" ? done() : done; closeSheet(); toast(msg); await load(); }
     catch(ex){ err.textContent=errMsg(ex); btn.disabled=false; btn.textContent=label; }
   });
 }
@@ -735,14 +736,42 @@ async function saveReceipt(id, file){
 }
 
 function sheetAdd(){
-  openSheet(`<h3>Add money</h3><form>${amountField()}
-    <label class="f">Into${seg("account","spending")}</label>
-    <div class="two"><label class="f">From<input id="f-from" name="from" placeholder="Allowance, Grandma…" maxlength="60"></label>${dateField()}</div>
-    <label class="f">Note<input id="f-note" name="note" placeholder="Weekly allowance, birthday…" maxlength="80"></label>
-    ${footer("Add money")}</form>`, el => bindForm(el, async fd=>{
+  openSheet(`<h3 id="addTitle">Add money</h3><form>
+    <div class="seg" role="radiogroup" aria-label="Add or remove" style="grid-template-columns:1fr 1fr;--tone:var(--accent)">
+      <label><input type="radio" name="mode" value="add" checked><span>Add</span></label>
+      <label><input type="radio" name="mode" value="remove"><span>Remove</span></label>
+    </div>
+    ${amountField()}
+    <label class="f"><span id="acctLbl">Into</span>${seg("account","spending")}</label>
+    <div id="addOnly"><div class="two"><label class="f">From<input id="f-from" name="from" placeholder="Allowance, Grandma…" maxlength="60"></label>${dateField()}</div>
+    <label class="f">Note<input id="f-note" name="note" placeholder="Weekly allowance, birthday…" maxlength="80"></label></div>
+    <div id="removeOnly" hidden><label class="f">Reason<input id="f-reason" name="reason" placeholder="Paid back Mom for the concert ticket" maxlength="60"></label>
+    <p class="sub" id="balNote" style="margin:10px 0 0"></p></div>
+    ${footer("Add money")}</form>`, el => {
+    const sync=()=>{
+      const rm = el.querySelector('input[name=mode]:checked').value==="remove";
+      el.querySelector("#addTitle").textContent = rm ? "Remove money" : "Add money";
+      el.querySelector("#acctLbl").textContent = rm ? "Take from" : "Into";
+      el.querySelector("#addOnly").hidden = rm; el.querySelector("#removeOnly").hidden = !rm;
+      el.querySelector("#submitBtn").textContent = rm ? "Remove money" : "Add money";
+      const a = el.querySelector('input[name=account]:checked').value;
+      el.querySelector("#balNote").textContent = `${acctName(a)} has ${fmt(balances()[a])}. Everyone gets an alert.`;
+    };
+    el.querySelectorAll('input[name=mode],input[name=account]').forEach(r=>r.addEventListener("change",sync));
+    bindForm(el, async fd=>{
       const amount=toCents(fd.get("amount")); if(!(amount>0)) throw "Enter an amount greater than $0.";
-      await rpc("fm_add",{p_pw:state.pw,p_pin:state.pin,p:{type:"deposit",account:fd.get("account"),amount,from_who:fd.get("from").trim(),note:fd.get("note").trim(),date:fd.get("date")}});
-    }, "Money added"));
+      const account=fd.get("account");
+      if (fd.get("mode")==="remove"){
+        const bal=balances()[account];
+        if (amount>bal) throw `${acctName(account)} only has ${fmt(bal)}.`;
+        await rpc("fm_remove_money",{p_pw:state.pw,p_pin:state.pin,p_account:account,p_amount:amount,p_reason:fd.get("reason").trim()});
+        el.dataset.done = `Took ${fmt(amount)} out of ${acctName(account)}`;
+      } else {
+        await rpc("fm_add",{p_pw:state.pw,p_pin:state.pin,p:{type:"deposit",account,amount,from_who:fd.get("from").trim(),note:fd.get("note").trim(),date:fd.get("date")}});
+        el.dataset.done = "Money added";
+      }
+    }, ()=>el.dataset.done);
+  });
 }
 function sheetBuy(){
   openSheet(`<h3>Log a purchase</h3><form>${amountField()}
@@ -813,6 +842,7 @@ function sheetDetail(id){
   if (t.source==="bank") rows.push(["Logged by","Her card (automatic)"]);
   if (t.source==="alert") rows.push(["Logged by","Capital One text alert (automatic)"]);
   if (t.source==="reimb") rows.push(["Logged by","Approved reimbursement request"]);
+  if (t.source==="payback") rows.push(["Logged by","Taken out by a parent"]);
   if (t.bank_status) rows.push(["Bank status", t.bank_status==="pending" ? "Pending (amount may change)" : "Posted"]);
   const editable = t.type==="purchase";
   openSheet(`<div class="detail"><h3>${esc(t.store||kind)}</h3>
@@ -1436,7 +1466,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-02.3";
+const APP_VERSION = "2026-11-02.4";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
