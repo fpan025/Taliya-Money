@@ -294,9 +294,11 @@ ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;f
 
   <div class="actions">
     <button class="act" id="btnAdd" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add money</button>
-    <button class="act" id="btnBuy" type="button"><svg viewBox="0 0 24 24"><path d="M6 7h12l-1 13H7L6 7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>Log purchase</button>
+    <button class="act" id="btnReimb" type="button"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>Request reimbursement</button>
     <button class="act" id="btnMove" type="button"><svg viewBox="0 0 24 24"><path d="M4 8h14l-4-4M20 16H6l4 4"/></svg>Move money</button>
   </div>
+
+  <div class="card" id="reimbCard" style="padding:0;gap:0" hidden></div>
 
   <div class="goal">
     <div class="goal-row"><h2 id="goalTitle">Savings goal</h2><button class="link" id="btnGoal" type="button">Set a goal</button></div>
@@ -386,7 +388,10 @@ const ERR = {
   future_week:"You can't pay a week that hasn't started.",
   bad_days:"Pick at least one day.", bad_name:"Give the chore a name.",
   bad_due:"Pick a due date of today or later.", not_open:"That optional chore has already changed. Pull down to refresh.",
-  past_due:"The due date for that optional chore has passed."
+  past_due:"The due date for that optional chore has passed.",
+  bad_reason:"Add a reason for the reimbursement.", bad_amount:"Enter an amount between $0.01 and $1,000.",
+  too_many:"There are already 10 requests waiting. Wait for a parent to answer some first.",
+  reimb_closed:"That request was already answered. Pull down to refresh."
 };
 function errMsg(e){
   if (typeof e==="string") return e;
@@ -400,14 +405,17 @@ async function load(){
     rpc("fm_bank_public", {p_pw: state.pw}).catch(()=>null),
     rpc("fm_extra_list", {p_pw: state.pw}).catch(()=>null),
     rpc("fm_invest_public", {p_pw: state.pw}).catch(()=>null) ]);
+  const rb = await rpc("fm_reimb_list", {p_pw: state.pw}).catch(()=>null);
+  if (rb) state.reimb = rb;
   state.tx = (r.tx||[]).map(t => ({...t, created_at:Number(t.created_at)}));
   state.goal = r.goal;
   state.bank = bk;
   if (ex) state.extra = ex;
   state.invest = inv;
   state.ch = { chores:c.chores||[], checks:(c.checks||[]).map(k=>({...k,checked_at:Number(k.checked_at)})), settings:c.settings||state.ch.settings, payouts:c.payouts||[], today:c.today||today() };
-  render(); renderChores(); renderExtra();
+  render(); renderChores(); renderExtra(); renderReimb();
   maybeParentCheer();
+  maybeReimbFocus();
   maybeOfferPrompt();
   saveAppUrl();
 }
@@ -669,7 +677,7 @@ function render(){
     if (t.type==="deposit"){ title=t.note||"Money added"; sub=`Into ${acctName(t.account)}`+(t.from_who?` · from ${t.from_who}`:""); sign="+"; }
     else if (t.type==="purchase"){ title=t.store||"Purchase"; sub=acctName(t.account)+(t.note?` · ${t.note}`:""); sign="−"; }
     else { title=`${acctName(t.account)} → ${acctName(t.to_account)}`; sub=t.note||"Moved money"; tone=t.to_account; if(f===t.account)sign="−"; else if(f===t.to_account)sign="+"; }
-    const tags = (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.source==="bank"||t.source==="alert"?'<span class="tag pay">Card</span>':"")
+    const tags = (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.source==="bank"||t.source==="alert"?'<span class="tag pay">Card</span>':"")+(t.source==="reimb"?'<span class="tag">Reimbursement</span>':"")
       +(t.bank_status==="pending"?'<span class="tag">Pending</span>':"")+(t.has_receipt?'<span class="tag">Receipt</span>':"");
     html+=`<button type="button" class="row t-${tone}" data-detail="${esc(t.id)}">
       <span class="ico">${ICON[t.type]}</span>
@@ -804,6 +812,7 @@ function sheetDetail(id){
   if (t.source==="apple pay") rows.push(["Logged by","Apple Pay (automatic)"]);
   if (t.source==="bank") rows.push(["Logged by","Her card (automatic)"]);
   if (t.source==="alert") rows.push(["Logged by","Capital One text alert (automatic)"]);
+  if (t.source==="reimb") rows.push(["Logged by","Approved reimbursement request"]);
   if (t.bank_status) rows.push(["Bank status", t.bank_status==="pending" ? "Pending (amount may change)" : "Posted"]);
   const editable = t.type==="purchase";
   openSheet(`<div class="detail"><h3>${esc(t.store||kind)}</h3>
@@ -865,14 +874,14 @@ function requireParent(then){
         const ok = await rpc("fm_parent_ok",{p_pw:state.pw,p_pin:pin});
         if (!ok) throw {code:"wrong_pin"};
         state.pin=pin; if (fd.get("remember")) pinStore.set(pin);
-        renderParentBtn(); closeSheet(); render(); renderChores(); renderExtra(); toast("Parent mode on"); maybeParentCheer();
+        renderParentBtn(); closeSheet(); render(); renderChores(); renderExtra(); renderReimb(); toast("Parent mode on"); maybeParentCheer();
         then && then();
       } catch(ex){ err.textContent=errMsg(ex); btn.disabled=false; btn.textContent="Unlock"; }
     });
   });
 }
 $("#btnParent").addEventListener("click", ()=>{
-  if (state.pin){ state.pin=null; state.alerts=null; pinStore.clear(); renderParentBtn(); render(); renderChores(); renderExtra(); toast("Parent mode off"); }
+  if (state.pin){ state.pin=null; state.alerts=null; pinStore.clear(); renderParentBtn(); render(); renderChores(); renderExtra(); renderReimb(); toast("Parent mode off"); }
   else requireParent();
 });
 
@@ -1292,6 +1301,97 @@ function maybeOfferPrompt(){
   });
 }
 
+
+/* ---------- reimbursement requests ---------- */
+state.reimb = [];
+const RSTATUS = { pending:["Waiting for a parent","wait"], approved:["Approved ✓","go"], denied:["Denied",""], cancelled:["Withdrawn",""] };
+function renderReimb(){
+  const el=$("#reimbCard"); if(!el) return;
+  const list=state.reimb||[];
+  if (!list.length){ el.hidden=true; el.innerHTML=""; return; }
+  el.hidden=false;
+  const ago = ms => new Date(Number(ms)).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+  const rows=list.map(r=>{
+    const [label,cls]=RSTATUS[r.status]||[r.status,""];
+    const muted = r.status==="denied"||r.status==="cancelled";
+    const changed = r.status==="approved" && r.paid_amount!=null && r.paid_amount!==r.amount;
+    let acts="";
+    if (r.status==="pending"){
+      acts = state.pin
+        ? `<div class="xbtns"><button type="button" class="btn primary" data-ract="review" data-rid="${r.id}">Review</button></div>`
+        : `<div class="xbtns"><button type="button" class="btn ghost" data-ract="review" data-rid="${r.id}">Review (parent)</button><button type="button" class="btn ghost" data-ract="cancel" data-rid="${r.id}">Withdraw</button></div>`;
+    }
+    return `<div class="xrow ${muted?"muted":""}">
+      <div class="xtop"><div><b>${esc(r.reason)}</b><span class="xmeta">${r.requested_by==="Parent"?"Added by a parent":"Asked by Taliya"} · ${esc(ago(r.created_at))}${changed?` · asked for ${fmt(r.amount)}`:""}${r.parent_note?` · “${esc(r.parent_note)}”`:""}</span></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px"><span class="xamt num">${fmt(r.status==="approved"&&r.paid_amount!=null?r.paid_amount:r.amount)}</span><span class="xpill ${cls}">${label}</span></div></div>
+      ${acts}</div>`;
+  }).join("");
+  el.innerHTML = `<div class="goal-row" style="padding:16px 16px 8px"><h2>Reimbursements</h2></div>${rows}<div class="err" id="rerr" role="alert" style="padding:0 16px 12px"></div>`;
+}
+document.addEventListener("click", async e=>{
+  const b=e.target.closest("[data-ract]"); if(!b || b.disabled) return;
+  const id=b.dataset.rid, r=(state.reimb||[]).find(x=>x.id===id); if(!r) return;
+  if (b.dataset.ract==="review"){ requireParent(()=>sheetReimbReview(id)); return; }
+  if (!b.dataset.armed){ b.dataset.armed="1"; b.textContent="Tap again to withdraw"; return; }
+  b.disabled=true;
+  try { await rpc("fm_reimb_cancel",{p_pw:state.pw,p_id:id}); toast("Request withdrawn"); await load(); }
+  catch(ex){ const x=$("#rerr"); if(x) x.textContent=errMsg(ex); b.disabled=false; await load().catch(()=>{}); }
+});
+function sheetReimb(){
+  openSheet(`<h3>Request reimbursement</h3><form>${amountField()}
+    <label class="f">Reason<input id="r-reason" name="reason" maxlength="120" placeholder="School supplies, lunch for the team…" required></label>
+    <p class="sub" style="margin:0">${state.pin?"This adds a request you can approve right away from the Reimbursements card.":"Your parents get an alert. They can approve it, change the amount, or say no. Approved money goes into your Spending."}</p>
+    ${footer("Send request")}</form>`, el=>{
+    setTimeout(()=>el.querySelector("#f-amount")?.focus(),60);
+    bindForm(el, async fd=>{
+      const amount=toCents(fd.get("amount")); if(!(amount>0)) throw "Enter an amount greater than $0.";
+      const reason=fd.get("reason").trim(); if(!reason) throw ERR.bad_reason;
+      const args={p_pw:state.pw,p_amount:amount,p_reason:reason}; if (state.pin) args.p_pin=state.pin;
+      await rpc("fm_reimb_request",args);
+    }, state.pin ? "Request added" : "Request sent. Your parents were notified.");
+  });
+}
+function sheetReimbReview(id){
+  const r=(state.reimb||[]).find(x=>x.id===id);
+  if (!r || r.status!=="pending"){ toast(ERR.reimb_closed); return; }
+  openSheet(`<div class="detail"><h3>Reimbursement request</h3><form>
+    <dl><dt>Reason</dt><dd>${esc(r.reason)}</dd><dt>Asked for</dt><dd class="num">${fmt(r.amount)}</dd><dt>From</dt><dd>${r.requested_by==="Parent"?"A parent":"Taliya"}</dd></dl>
+    <label class="f">Amount to pay<input class="amount-in num" id="f-amount" name="amount" inputmode="decimal" value="${(r.amount/100).toFixed(2)}" autocomplete="off"></label>
+    <label class="f">Note to Taliya (optional)<input id="r-note" name="note" maxlength="120" placeholder="Half now, half when you show the receipt…"></label>
+    <p class="sub" style="margin:0">Approved money goes into Spending. Everyone in the family gets the result.</p>
+    <div class="err" id="err" role="alert"></div>
+    <div class="btns"><button type="button" class="btn danger" id="denyBtn">Deny</button><button type="submit" class="btn primary" id="submitBtn">Approve ${fmt(r.amount)}</button></div>
+  </form></div>`, el=>{
+    const amt=el.querySelector("#f-amount"), ok=el.querySelector("#submitBtn"), err=el.querySelector("#err"), deny=el.querySelector("#denyBtn");
+    amt.addEventListener("input", ()=>{ const c=toCents(amt.value); ok.textContent = c>0 ? (c===r.amount?`Approve ${fmt(c)}`:`Approve ${fmt(c)} instead`) : "Approve"; });
+    const send = async approve => {
+      err.textContent="";
+      const c = toCents(amt.value), note = el.querySelector("#r-note").value.trim();
+      if (approve && !(c>0)) { err.textContent="Enter an amount greater than $0, or tap Deny."; return; }
+      ok.disabled=deny.disabled=true;
+      try {
+        await rpc("fm_reimb_decide",{p_pw:state.pw,p_pin:state.pin,p_id:id,p_approve:approve,p_amount:approve?c:null,p_note:note});
+        closeSheet(); toast(approve ? `Approved ${fmt(c)} into Spending` : "Request denied"); await load();
+      } catch(ex){ err.textContent=errMsg(ex); ok.disabled=deny.disabled=false; }
+    };
+    let armed=false;
+    deny.addEventListener("click", ()=>{ if(!armed){ armed=true; deny.textContent="Tap again to deny"; return; } send(false); });
+    el.querySelector("form").addEventListener("submit", ev=>{ ev.preventDefault(); send(true); });
+  });
+}
+// opened from the "Reimbursement request" alert: go to the Money tab and the request
+state.reimbFocus = location.hash === "#reimb";
+window.addEventListener("hashchange", ()=>{ if (location.hash === "#reimb"){ state.reimbFocus = true; maybeReimbFocus(); } });
+function maybeReimbFocus(){
+  if (!state.reimbFocus || $("#app").hidden) return;
+  state.reimbFocus = false;
+  try { history.replaceState(null, "", location.pathname + location.search); } catch(e){}
+  setTab("money");
+  const el=$("#reimbCard"); if (el && !el.hidden) setTimeout(()=>el.scrollIntoView({behavior:"smooth",block:"start"}),150);
+  const p=(state.reimb||[]).filter(x=>x.status==="pending");
+  if (p.length===1 && $("#scrim").hidden) requireParent(()=>sheetReimbReview(p[0].id));
+}
+
 function setTab(t){
   state.tab=t; $("#tabMoney").setAttribute("aria-selected", t==="money"); $("#tabChores").setAttribute("aria-selected", t==="chores");
   $("#moneyView").hidden = t!=="money"; $("#choresView").hidden = t!=="chores";
@@ -1304,7 +1404,7 @@ $("#wkNext").addEventListener("click", ()=>{ state.wk=Math.min(0,state.wk+1); st
 
 /* ---------- events ---------- */
 $("#btnAdd").addEventListener("click", ()=>requireParent(sheetAdd));
-$("#btnBuy").addEventListener("click", sheetBuy);
+$("#btnReimb").addEventListener("click", sheetReimb);
 $("#btnMove").addEventListener("click", ()=>requireParent(sheetMove));
 $("#btnGoal").addEventListener("click", sheetGoal);
 $("#btnLock").addEventListener("click", ()=>{ store.clear(); pinStore.clear(); state.pw=null; state.pin=null; state.alerts=null; state.tx=[]; renderParentBtn(); showLogin(); });
@@ -1336,7 +1436,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-02.2";
+const APP_VERSION = "2026-11-02.3";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
