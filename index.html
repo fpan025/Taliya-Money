@@ -98,6 +98,8 @@ section.activity{display:flex;flex-direction:column;gap:12px}
 .tags{display:flex;gap:4px}
 .tag{font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--bg);color:var(--muted);border:1px solid var(--line)}
 .tag.pay{color:var(--accent)}
+.tag.ok{color:var(--save);border-color:var(--save)} .tag.warn{color:var(--danger);border-color:var(--danger)} .tag.wait{color:var(--accent);border-color:var(--accent)}
+.fundsum{font-size:14px;color:var(--muted);padding:14px 16px 4px}
 .empty{padding:28px 20px;text-align:center;display:flex;flex-direction:column;gap:8px;align-items:center;color:var(--muted)}
 .empty b{color:var(--ink);font-size:17px}
 .notice{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;font-size:14px;color:var(--muted)}
@@ -392,7 +394,8 @@ const ERR = {
   bad_reason:"Add a reason for the reimbursement.", bad_amount:"Enter an amount between $0.01 and $1,000.",
   too_many:"There are already 10 requests waiting. Wait for a parent to answer some first.",
   reimb_closed:"That request was already answered. Pull down to refresh.",
-  not_enough:"There isn't that much in that account."
+  not_enough:"There isn't that much in that account.",
+  bank_funded:"Capital One already shows this deposit arrived."
 };
 function errMsg(e){
   if (typeof e==="string") return e;
@@ -422,6 +425,7 @@ async function load(){
 }
 
 /* ---------- balances & render ---------- */
+const needsFund = t => t.type==="deposit" && t.source!=="bank";
 function balances(){
   const b={spending:0,savings:0,gift:0};
   for (const t of state.tx){
@@ -656,18 +660,21 @@ function render(){
     $("#btnGoal").textContent="Set a goal";
   }
 
-  const opts=[["all","All"],["spending","Spending"],["savings","Savings"],["gift","Gifts"],["receipts","Receipts"]];
+  const banked = !!(state.bank && state.bank.connected);
+  const opts=[["all","All"],["spending","Spending"],["savings","Savings"],["gift","Gifts"],["receipts","Receipts"]].concat(banked?[["unfunded","Not funded"]]:[]);
+  if (!banked && state.filter==="unfunded") state.filter="all";
   $("#chips").innerHTML = opts.map(([k,l])=>`<button type="button" class="chip" data-filter="${k}" aria-pressed="${state.filter===k}">${l}</button>`).join("");
 
   const f=state.filter;
   let rows=state.tx.slice();
   if (f==="receipts") rows=rows.filter(t=>t.has_receipt);
+  else if (f==="unfunded") rows=rows.filter(t=>needsFund(t) && !t.fund_status);
   else if (f!=="all") rows=rows.filter(t=>t.account===f||t.to_account===f);
   rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.created_at||0)-(a.created_at||0));
 
   if (!rows.length){
     $("#list").innerHTML = state.tx.length
-      ? `<div class="empty"><b>Nothing here yet</b><span>No ${f==="receipts"?"purchases with receipts":acctName(f).toLowerCase()+" activity"} so far.</span></div>`
+      ? (f==="unfunded" ? `<div class="empty"><b>All caught up ✓</b><span>Every deposit has arrived in Taliya's Capital One account.</span></div>` : `<div class="empty"><b>Nothing here yet</b><span>No ${f==="receipts"?"purchases with receipts":acctName(f).toLowerCase()+" activity"} so far.</span></div>`)
       : `<div class="empty"><b>No activity yet</b><span>Start with Taliya's current balances: tap <strong>Add money</strong> and enter what's in each account today as an opening balance.</span></div>`;
     return;
   }
@@ -678,13 +685,18 @@ function render(){
     if (t.type==="deposit"){ title=t.note||"Money added"; sub=`Into ${acctName(t.account)}`+(t.from_who?` · from ${t.from_who}`:""); sign="+"; }
     else if (t.type==="purchase"){ title=t.store||"Purchase"; sub=acctName(t.account)+(t.note?` · ${t.note}`:""); sign="−"; }
     else { title=`${acctName(t.account)} → ${acctName(t.to_account)}`; sub=t.note||"Moved money"; tone=t.to_account; if(f===t.account)sign="−"; else if(f===t.to_account)sign="+"; }
-    const tags = (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.source==="bank"||t.source==="alert"?'<span class="tag pay">Card</span>':"")+(t.source==="reimb"?'<span class="tag">Reimbursement</span>':"")+(t.source==="payback"?'<span class="tag">Taken out</span>':"")
+    const fundTag = banked && needsFund(t) ? (t.fund_status==="funded" ? '<span class="tag ok">Funded ✓</span>' : t.fund_status==="pending" ? '<span class="tag wait">Pending</span>' : '<span class="tag warn">Not funded</span>') : "";
+    const tags = fundTag + (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.source==="bank"||t.source==="alert"?'<span class="tag pay">Card</span>':"")+(t.source==="reimb"&&!fundTag?'<span class="tag">Reimbursement</span>':"")+(t.source==="payback"?'<span class="tag">Taken out</span>':"")
       +(t.bank_status==="pending"?'<span class="tag">Pending</span>':"")+(t.has_receipt?'<span class="tag">Receipt</span>':"");
     html+=`<button type="button" class="row t-${tone}" data-detail="${esc(t.id)}">
       <span class="ico">${ICON[t.type]}</span>
       <span class="what"><b>${esc(title)}</b><span>${esc(sub)}</span></span>
       <span class="right"><span class="money num ${sign==="+"?"plus":""}">${sign}${fmt(t.amount)}</span>${tags?`<span class="tags">${tags}</span>`:""}</span>
     </button>`;
+  }
+  if (f==="unfunded"){
+    const owe=rows.reduce((a,t)=>a+t.amount,0);
+    html = `<div class="fundsum">Transfer <b>${fmt(owe)}</b> to Taliya's Capital One to cover these. Each one changes to Funded ✓ when the money arrives.</div>` + html;
   }
   $("#list").innerHTML=html;
 }
@@ -844,6 +856,14 @@ function sheetDetail(id){
   if (t.source==="reimb") rows.push(["Logged by","Approved reimbursement request"]);
   if (t.source==="payback") rows.push(["Logged by","Taken out by a parent"]);
   if (t.bank_status) rows.push(["Bank status", t.bank_status==="pending" ? "Pending (amount may change)" : "Posted"]);
+  const banked = !!(state.bank && state.bank.connected), fundable = banked && needsFund(t);
+  if (fundable){
+    const fd = t.fund_date ? dayLabel(t.fund_date) : "";
+    rows.push(["Capital One", t.fund_status==="funded"
+      ? (t.fund_by==="opening" ? "Funded ✓ (already in the account)" : t.fund_by==="parent" ? "Funded ✓ (marked by a parent)" : "Funded ✓ · arrived "+fd)
+      : t.fund_status==="pending" ? (t.fund_by==="parent" ? "Pending · marked as sent" : "Pending · transfer on the way")
+      : "Not funded · transfer "+fmt(t.amount)+" to her account"]);
+  }
   const editable = t.type==="purchase";
   openSheet(`<div class="detail"><h3>${esc(t.store||kind)}</h3>
     <div id="rslot">${t.has_receipt?'<div class="sub">Loading receipt…</div>':""}</div>
@@ -852,6 +872,10 @@ function sheetDetail(id){
       ${editable?`<label class="f">Store<input id="e-store" name="store" value="${esc(t.store||"")}" maxlength="60"></label>
       <label class="f">What was it?<input id="e-note" name="note" value="${esc(t.note||"")}" maxlength="80" placeholder="Phone case, movie ticket…"></label>
       ${receiptField()}`:(t.note?`<dl><dt>Note</dt><dd>${esc(t.note)}</dd></dl>`:"")}
+      ${fundable && !(t.fund_by==="bank" && t.fund_status==="funded") && t.fund_by!=="opening" ? `<div class="btns" id="fundBtns">
+        ${t.fund_status!=="pending"?'<button type="button" class="btn ghost" data-fund="pending">I sent it</button>':""}
+        ${t.fund_status!=="funded"?'<button type="button" class="btn ghost" data-fund="funded">Mark funded</button>':""}
+        ${t.fund_status?'<button type="button" class="btn ghost" data-fund="none">Not funded</button>':""}</div>`:""}
       <div class="err" id="err" role="alert"></div>
       <div class="btns"><button type="button" class="btn danger" id="delBtn">Delete</button>${editable?'<button type="submit" class="btn primary" id="saveBtn">Save</button>':'<button type="button" class="btn ghost" data-close>Close</button>'}</div>
     </form></div>`, async el=>{
@@ -859,6 +883,13 @@ function sheetDetail(id){
     const fi = editable ? bindPicker(el) : null;
     if (editable && t.has_receipt) el.querySelector("#pick span").textContent="Replace receipt photo";
     const err=el.querySelector("#err");
+    el.querySelectorAll("[data-fund]").forEach(b=>b.addEventListener("click", async ()=>{
+      if(!state.pin){ requireParent(()=>sheetDetail(id)); return; }
+      b.disabled=true;
+      try { await rpc("fm_set_funding",{p_pw:state.pw,p_pin:state.pin,p_id:t.id,p_status:b.dataset.fund});
+        closeSheet(); toast({pending:"Marked as sent",funded:"Marked funded",none:"Marked not funded"}[b.dataset.fund]); await load(); }
+      catch(e){ err.textContent=errMsg(e); b.disabled=false; }
+    }));
     const del=el.querySelector("#delBtn"); let armed=false;
     del.addEventListener("click", async ()=>{
       if(!state.pin){ requireParent(()=>sheetDetail(id)); return; }
@@ -1466,7 +1497,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-02.4";
+const APP_VERSION = "2026-11-03.1";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
