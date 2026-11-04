@@ -685,7 +685,7 @@ function render(){
     if (t.type==="deposit"){ title=t.note||"Money added"; sub=`Into ${acctName(t.account)}`+(t.from_who?` · from ${t.from_who}`:""); sign="+"; }
     else if (t.type==="purchase"){ title=t.store||"Purchase"; sub=acctName(t.account)+(t.note?` · ${t.note}`:""); sign="−"; }
     else { title=`${acctName(t.account)} → ${acctName(t.to_account)}`; sub=t.note||"Moved money"; tone=t.to_account; if(f===t.account)sign="−"; else if(f===t.to_account)sign="+"; }
-    const fundTag = banked && needsFund(t) ? (t.fund_state==="posted" ? '<span class="tag ok">Posted</span>' : t.fund_state==="pending" ? '<span class="tag wait">Pending</span>' : '<span class="tag warn">Not funded</span>') : "";
+    const fundTag = banked && needsFund(t) ? (t.fund_state==="funded" ? '<span class="tag ok">Funded</span>' : '<span class="tag warn">Not funded</span>') : "";
     const tags = fundTag + (t.source==="apple pay"?'<span class="tag pay">Apple Pay</span>':"")+(t.source==="bank"||t.source==="alert"?'<span class="tag pay">Card</span>':"")+(t.source==="reimb"&&!fundTag?'<span class="tag">Reimbursement</span>':"")+(t.source==="payback"?'<span class="tag">Taken out</span>':"")
       +(t.bank_status==="pending"?'<span class="tag">Pending</span>':"")+(t.has_receipt?'<span class="tag">Receipt</span>':"");
     html+=`<button type="button" class="row t-${tone}" data-detail="${esc(t.id)}">
@@ -696,7 +696,7 @@ function render(){
   }
   if (f==="unfunded"){
     const owe=rows.reduce((a,t)=>a+t.amount,0);
-    html = `<div class="fundsum">Transfer <b>${fmt(owe)}</b> to Taliya's Capital One to cover these. Each one changes to Pending when Capital One shows the transfer, then Posted once it settles.</div>` + html;
+    html = `<div class="fundsum">Transfer <b>${fmt(owe)}</b> to Taliya's Capital One to cover these. Each one changes to Funded when a matching transfer shows up in her account.</div>` + html;
   }
   $("#list").innerHTML=html;
 }
@@ -859,9 +859,8 @@ function sheetDetail(id){
   const banked = !!(state.bank && state.bank.connected), fundable = banked && needsFund(t);
   if (fundable){
     const fd = t.fund_date ? dayLabel(t.fund_date) : "";
-    rows.push(["Capital One", t.fund_state==="posted"
-      ? (t.fund_by==="opening" ? "Posted (already in the account)" : t.fund_by==="parent" ? "Posted (marked by a parent)" : "Posted · transfer from "+fd)
-      : t.fund_state==="pending" ? (t.fund_by==="parent" ? "Pending · marked as sent" : "Pending · transfer from "+fd+", not settled yet")
+    rows.push(["Capital One", t.fund_state==="funded"
+      ? (t.fund_by==="opening" ? "Funded (already in the account)" : t.fund_by==="parent" ? "Funded (marked by a parent)" : "Funded · matching transfer on "+fd)
       : "Not funded · transfer "+fmt(t.amount)+" to her account"]);
   }
   const editable = t.type==="purchase";
@@ -873,9 +872,8 @@ function sheetDetail(id){
       <label class="f">What was it?<input id="e-note" name="note" value="${esc(t.note||"")}" maxlength="80" placeholder="Phone case, movie ticket…"></label>
       ${receiptField()}`:(t.note?`<dl><dt>Note</dt><dd>${esc(t.note)}</dd></dl>`:"")}
       ${fundable && t.fund_by!=="bank" && t.fund_by!=="opening" ? `<div class="btns" id="fundBtns">
-        ${t.fund_status!=="pending"?'<button type="button" class="btn ghost" data-fund="pending">I sent it</button>':""}
-        ${t.fund_status!=="funded"?'<button type="button" class="btn ghost" data-fund="funded">Mark posted</button>':""}
-        ${t.fund_status?'<button type="button" class="btn ghost" data-fund="none">Not funded</button>':""}</div>`:""}
+        ${t.fund_status!=="funded"?'<button type="button" class="btn ghost" data-fund="funded">Mark funded</button>':""}
+        ${t.fund_status?'<button type="button" class="btn ghost" data-fund="none">Mark not funded</button>':""}</div>`:""}
       <div class="err" id="err" role="alert"></div>
       <div class="btns"><button type="button" class="btn danger" id="delBtn">Delete</button>${editable?'<button type="submit" class="btn primary" id="saveBtn">Save</button>':'<button type="button" class="btn ghost" data-close>Close</button>'}</div>
     </form></div>`, async el=>{
@@ -887,7 +885,7 @@ function sheetDetail(id){
       if(!state.pin){ requireParent(()=>sheetDetail(id)); return; }
       b.disabled=true;
       try { await rpc("fm_set_funding",{p_pw:state.pw,p_pin:state.pin,p_id:t.id,p_status:b.dataset.fund});
-        closeSheet(); toast({pending:"Marked as sent",funded:"Marked as posted",none:"Marked not funded"}[b.dataset.fund]); await load(); }
+        closeSheet(); toast({pending:"Marked as sent",funded:"Marked funded",none:"Marked not funded"}[b.dataset.fund]); await load(); }
       catch(e){ err.textContent=errMsg(e); b.disabled=false; }
     }));
     const del=el.querySelector("#delBtn"); let armed=false;
@@ -1497,7 +1495,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-03.2";
+const APP_VERSION = "2026-11-03.3";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
