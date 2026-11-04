@@ -672,6 +672,17 @@ function render(){
   else if (f!=="all") rows=rows.filter(t=>t.account===f||t.to_account===f);
   rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.created_at||0)-(a.created_at||0));
 
+  // last 30 days by default; "Show older" adds one earlier month at a time (Not funded always shows everything)
+  const cut = activityCutoff(state.olderMonths||0), nextCut = activityCutoff((state.olderMonths||0)+1);
+  const hasOlder = f!=="unfunded" && rows.some(t=>(t.date||"")<cut);
+  if (f!=="unfunded") rows=rows.filter(t=>(t.date||"")>=cut);
+  const [ny,nm] = nextCut.split("-").map(Number);
+  const olderBtn = hasOlder ? `<button type="button" class="btn ghost" id="showOlder" style="margin:12px 16px 16px;width:calc(100% - 32px)">Show older · ${new Date(ny,nm-1,1).toLocaleDateString("en-US",{month:"long",year:"numeric"})}</button>` : "";
+
+  if (!rows.length && hasOlder){
+    $("#list").innerHTML = `<div class="empty"><b>Nothing in the last 30 days</b><span>Tap Show older to see earlier activity.</span></div>` + olderBtn;
+    return;
+  }
   if (!rows.length){
     $("#list").innerHTML = state.tx.length
       ? (f==="unfunded" ? `<div class="empty"><b>All caught up ✓</b><span>Every deposit has a matching transfer in Taliya's Capital One account.</span></div>` : `<div class="empty"><b>Nothing here yet</b><span>No ${f==="receipts"?"purchases with receipts":acctName(f).toLowerCase()+" activity"} so far.</span></div>`)
@@ -698,7 +709,13 @@ function render(){
     const owe=rows.reduce((a,t)=>a+t.amount,0);
     html = `<div class="fundsum">Transfer <b>${fmt(owe)}</b> to Taliya's Capital One to cover these. Each one changes to Funded when a matching transfer shows up in her account.</div>` + html;
   }
-  $("#list").innerHTML=html;
+  $("#list").innerHTML=html + olderBtn;
+}
+function activityCutoff(n){
+  const c = addDays(today(), -30);
+  if (!n) return c;
+  const [Y,M] = c.split("-").map(Number);
+  return ymd(new Date(Y, M-1-(n-1), 1));     // 1 = start of that month, 2 = the month before, …
 }
 
 /* ---------- sheets ---------- */
@@ -1469,6 +1486,7 @@ $("#btnGoal").addEventListener("click", sheetGoal);
 $("#btnLock").addEventListener("click", ()=>{ store.clear(); pinStore.clear(); state.pw=null; state.pin=null; state.alerts=null; state.tx=[]; renderParentBtn(); showLogin(); });
 document.addEventListener("click", e=>{
   const a=e.target.closest("[data-acct]"); if(a){ state.filter = state.filter===a.dataset.acct?"all":a.dataset.acct; render(); return; }
+  if (e.target.closest("#showOlder")){ state.olderMonths=(state.olderMonths||0)+1; render(); return; }
   const f=e.target.closest("[data-filter]"); if(f){ state.filter=f.dataset.filter; render(); return; }
   const d=e.target.closest("[data-detail]"); if(d){ sheetDetail(d.dataset.detail); return; }
   const dy=e.target.closest("[data-day]"); if(dy){ state.day=dy.dataset.day; renderChores(); return; }
@@ -1495,7 +1513,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-03.3";
+const APP_VERSION = "2026-11-03.4";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
