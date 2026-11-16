@@ -456,6 +456,7 @@ function renderBank(){
       <label class="sw" for="bk-show"><span>Show details<small>Connection details and buttons</small></span><input type="checkbox" id="bk-show" ${det?"checked":""}></label>
       <div id="bk-details" style="display:flex;flex-direction:column;gap:10px" ${det?"":"hidden"}>
       <div class="sub">Checks for new purchases every 30 minutes.</div>
+      ${unfundedHtml()}
       ${bk.problem && state.pin ? `<div class="err" id="bk-problem">Loading details…</div>` : bk.problem ? `<div class="sub">Ask a parent to check the card connection.</div>` : ""}
       <div class="err" id="bk-err" role="alert"></div>
       <div class="btns"><button type="button" class="btn ghost small" id="bk-sync">Check now</button>
@@ -463,6 +464,14 @@ function renderBank(){
       </div>`;
     $("#bk-show").addEventListener("change", e=>{ if (e.target.checked) bankStore.set("1"); else bankStore.clear(); $("#bk-details").hidden = !e.target.checked; });
   }
+  el.querySelectorAll("[data-markfund]").forEach(b=>b.addEventListener("click", ()=>{
+    const id=b.dataset.markfund;
+    requireParent(async ()=>{
+      b.disabled=true;
+      try { await rpc("fm_set_funding",{p_pw:state.pw,p_pin:state.pin,p_id:id,p_status:"funded"}); toast("Marked funded"); await load(); }
+      catch(e){ $("#bk-err").textContent=errMsg(e); b.disabled=false; }
+    });
+  }));
   $("#bk-connect")?.addEventListener("click", ()=>connectBank(!!bk.connected));
   $("#bk-sync")?.addEventListener("click", async ()=>{
     try { const ok = await rpc("fm_bank_sync_now",{p_pw:state.pw}); toast(ok?"Checking for new purchases…":"Checked a moment ago");
@@ -478,6 +487,26 @@ function renderBank(){
   if (bk.problem && state.pin){
     rpc("fm_bank_status",{p_pw:state.pw,p_pin:state.pin}).then(s=>{ const p=$("#bk-problem"); if(p) p.textContent=s.error||"The last check didn't finish. Tap Check now."; }).catch(()=>{});
   }
+}
+// "Not funded" deposits inside the Capital One card's details (allowance splits count as one)
+function unfundedHtml(){
+  const groups=new Map();
+  for (const t of (state.tx||[])) {
+    if (!needsFund(t) || t.fund_state) continue;
+    const k = t.source==="allowance" ? "a|"+(t.note||"")+"|"+t.date : t.id;
+    const g = groups.get(k) || {id:t.id, date:t.date, amount:0, title: t.source==="allowance" ? (t.note||"Allowance") : (t.note||t.from_who||"Money added")};
+    g.amount += t.amount; groups.set(k,g);
+  }
+  const list=[...groups.values()].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  if (!list.length) return `<div class="sub">Not funded deposits: none. Every deposit has a matching transfer ✓</div>`;
+  const total=list.reduce((a,g)=>a+g.amount,0);
+  return `<div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px">
+    <b style="font-size:15px">Not funded · ${fmt(total)}</b>
+    <div class="sub" style="margin:0">Mark one funded if you covered it another way, like cash or one transfer for several deposits.</div>
+    ${list.map(g=>`<div style="display:flex;align-items:center;gap:10px">
+      <span style="flex:1;min-width:0"><b style="display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.title)}</b><span class="sub" style="font-size:13px">${esc(dayLabel(g.date))} · <span class="num">${fmt(g.amount)}</span></span></span>
+      <button type="button" class="btn ghost small" style="flex:none;width:auto;padding:8px 14px;min-height:38px" data-markfund="${esc(g.id)}">Mark funded</button></div>`).join("")}
+  </div>`;
 }
 function loadPlaidScript(){
   if (window.Plaid) return Promise.resolve();
@@ -1513,7 +1542,7 @@ async function refresh(){
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-03.4";
+const APP_VERSION = "2026-11-16.1";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
