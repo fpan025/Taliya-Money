@@ -373,7 +373,31 @@ async function rpc(fn, args){
     if (m==="wrong_pin" && fn!=="fm_parent_ok"){ state.pin=null; state.alerts=null; pinStore.clear(); renderParentBtn(); }  // PIN was changed
     throw {code: /^[a-z_]+$/.test(m) ? m : "server", message:m};
   }
+  if (!/^fm_(outbox_|load|bank_public|invest_public|extra_list|reimb_list|check|parent_ok)/.test(fn)) relaySoon();
   return text ? JSON.parse(text) : null;
+}
+/* ---------- notifications: sent from this phone ----------
+   The server puts each alert in an outbox. This phone sends it to ntfy.sh over its own
+   internet connection (so it doesn't share the server's free daily limit), then marks it sent.
+   Anything no phone sends within a minute, the server sends as a backup. */
+let relayTimer=null, relaying=false;
+function relaySoon(){ clearTimeout(relayTimer); relayTimer=setTimeout(relayOutbox, 400); }
+async function relayOutbox(){
+  if (relaying || !state.pw) return;
+  relaying=true;
+  try {
+    const rows = await rpc("fm_outbox_claim", {p_pw: state.pw});
+    const sent=[];
+    for (const r of (rows||[])) {
+      try {
+        // plain-text body = no CORS preflight; ntfy reads JSON posted to its root address
+        const res = await fetch("https://ntfy.sh/", {method:"POST", body: JSON.stringify(r.body)});
+        if (res.ok) sent.push(r.id);
+      } catch(e){ /* offline or refused: the server sends it as a backup */ }
+    }
+    if (sent.length) await rpc("fm_outbox_done", {p_pw: state.pw, p_ids: sent});
+  } catch(e){ /* try again on the next refresh */ }
+  finally { relaying=false; }
 }
 const ERR = {
   offline:"Can't reach the server. Check your internet connection and try again.",
@@ -1536,13 +1560,13 @@ $("#loginForm").addEventListener("submit", async e=>{
 });
 async function refresh(){
   if (!state.pw || document.hidden) return;
-  try { await load(); notice(""); }
+  try { await load(); notice(""); relayOutbox(); }
   catch(e){ if(e.code==="wrong_password"){ store.clear(); state.pw=null; showLogin("The family password changed. Enter the new one."); } else notice(errMsg(e)); }
 }
 document.addEventListener("visibilitychange", refresh);
 
 /* ---------- keep every phone on the newest version ---------- */
-const APP_VERSION = "2026-11-16.1";
+const APP_VERSION = "2026-11-19.1";
 $("#appVersion").textContent = "App version " + APP_VERSION;
 async function checkForUpdate(){
   if (document.hidden || !/^https?:/.test(location.protocol)) return;
